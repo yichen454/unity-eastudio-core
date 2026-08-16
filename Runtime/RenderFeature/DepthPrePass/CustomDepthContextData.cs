@@ -1,7 +1,7 @@
-using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-namespace EA.RenderFeature.DepthPrePass
+
+namespace EAStudio.Core.RenderFeature
 {
     public class CustomDepthContextData : ContextItem
     {

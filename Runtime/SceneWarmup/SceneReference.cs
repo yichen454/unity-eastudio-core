@@ -6,7 +6,7 @@ using UnityEngine.SceneManagement;
 using UnityEditor;
 #endif
 
-namespace EA.Timeline
+namespace EAStudio.Core.SceneWarmup
 {
     /// <summary>
     /// Serializable scene reference that supports drag-and-drop assignment in the Inspector.

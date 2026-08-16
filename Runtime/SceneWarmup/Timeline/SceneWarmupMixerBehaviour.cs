@@ -1,6 +1,6 @@
 using UnityEngine.Playables;
 
-namespace EA.Timeline
+namespace EAStudio.Core.SceneWarmup
 {
     /// <summary>
     /// Mixer behaviour for <see cref="SceneWarmupTrack"/>.

@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
 
-namespace EA.Timeline
+namespace EAStudio.Core.Timeline
 {
     /// <summary>
     /// Timeline 触发器轨道。将 <see cref="TimelineTrigger"/> 组件绑定到此轨道，

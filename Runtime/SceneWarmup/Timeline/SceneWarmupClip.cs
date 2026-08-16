@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
 
-namespace EA.Timeline
+namespace EAStudio.Core.SceneWarmup
 {
     /// <summary>
     /// A clip on the <see cref="SceneWarmupTrack"/>.

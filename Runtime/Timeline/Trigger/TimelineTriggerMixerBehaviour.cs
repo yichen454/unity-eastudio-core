@@ -1,6 +1,6 @@
 using UnityEngine.Playables;
 
-namespace EA.Timeline
+namespace EAStudio.Core.Timeline
 {
     /// <summary>
     /// <see cref="TimelineTriggerTrack"/> 的 Mixer。clip 级事件从 <see cref="TimelineTrigger.clips"/> 按索引读取。

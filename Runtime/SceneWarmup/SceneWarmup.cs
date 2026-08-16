@@ -5,12 +5,13 @@ using UnityEngine.Events;
 using UnityEngine.SceneManagement;
 using SceneObj = UnityEngine.SceneManagement.Scene;
 
-namespace EA.Timeline
+namespace EAStudio.Core.SceneWarmup
 {
     /// <summary>
-    /// 异步预加载、激活、卸载场景的 MonoBehaviour，可由 <see cref="EA.Scene.Timeline.SceneWarmupTrack"/> 驱动。
+    /// 异步预加载、激活、卸载场景的 MonoBehaviour，可由 <see cref="SceneWarmupTrack"/> 驱动。
     /// <para>编辑模式下加载始终为同步 Additive，<see cref="loadMode"/> 仅在运行模式下生效。</para>
     /// </summary>
+    [AddComponentMenu("EAStudio/Scene Warmup/Scene Warmup")]
     public class SceneWarmup : MonoBehaviour
     {
         [Tooltip("目标场景资产。")]
@@ -48,44 +49,21 @@ namespace EA.Timeline
         [Tooltip("Timeline clip 结束时触发。")]
         public UnityEvent onClipEnd = new UnityEvent();
 
-        // 持有引用以便 ActivateScene() 稍后翻转 allowSceneActivation。
-        private AsyncOperation _pendingLoad;
+        // 运行时状态
+        private Coroutine _loadCoroutine;
+        private AsyncOperation _pendingLoad; // PreloadOnly 模式下被暂停的加载操作
 
         private bool IsPreloadOnly => loadMode == SceneLoadMode.PreloadOnly;
         private bool IsReplaceMode => loadMode == SceneLoadMode.LoadAndReplace;
 
-#if UNITY_EDITOR
-        private void OnValidate()
-        {
-            if (IsPreloadOnly && setActiveOnLoad)
-                Debug.LogWarning(
-                    $"[SceneWarmup] '{name}': PreloadOnly 模式下 setActiveOnLoad 无效，" +
-                    "请在 ActivateScene() 之后手动调用 SetSceneActive()。",
-                    this);
+        // ── 公共 API ──────────────────────────────────────────────────────────
 
-            if (IsPreloadOnly || IsReplaceMode)
-                Debug.LogWarning(
-                    $"[SceneWarmup] '{name}': loadMode = {loadMode} 在编辑模式下不生效，" +
-                    "编辑模式始终以 Additive 同步加载。",
-                    this);
-        }
-#endif
-
-        // ── 加载 / 预加载 ──────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Additive 加载目标场景。PreloadOnly 模式下加载至 90% 后暂停，需调用 <see cref="ActivateScene"/> 完成激活。
-        /// 编辑模式下始终同步 Additive 加载，<see cref="loadMode"/> 不生效。可安全多次调用。
-        /// </summary>
+        /// <summary>按配置的 <see cref="loadMode"/> 开始异步加载场景。</summary>
         public void LoadScene()
         {
-            if (!scene.IsValid) return;
-
-            SceneObj loaded = SceneManager.GetSceneByPath(scene.ScenePath);
-            if (loaded.IsValid() && loaded.isLoaded)
+            if (scene == null || !scene.IsValid)
             {
-                ApplySetActiveScene(loaded);
-                onSceneLoaded.Invoke(loaded);
+                Debug.LogWarning("[SceneWarmup] 未指定有效场景。");
                 return;
             }
 
@@ -93,69 +71,58 @@ namespace EA.Timeline
             if (!Application.isPlaying)
             {
                 if (!runInEditMode) return;
-                var s = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(
-                    scene.ScenePath,
-                    UnityEditor.SceneManagement.OpenSceneMode.Additive);
-                ApplySetActiveScene(s);
-                onSceneLoaded.Invoke(s);
+
+                // 编辑模式：始终以同步 Additive 加载并立即触发事件。
+                SceneObj loaded = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(
+                    scene.ScenePath, UnityEditor.SceneManagement.OpenSceneMode.Additive);
+                ApplySetActiveScene(loaded);
+                onSceneLoaded.Invoke(loaded);
                 return;
             }
 #endif
-            if (_pendingLoad != null) return; // 已在预加载中
-            StartCoroutine(LoadCoroutine());
+
+            // 避免重复发起
+            if (_loadCoroutine != null || _pendingLoad != null) return;
+
+            SceneObj existing = SceneManager.GetSceneByPath(scene.ScenePath);
+            if (existing.IsValid() && existing.isLoaded) return;
+
+            _loadCoroutine = StartCoroutine(LoadCoroutine());
         }
 
         /// <summary>
-        /// 完成预加载场景的激活（仅 PreloadOnly 模式）。激活后触发 <see cref="onSceneActivated"/>。
-        /// LoadAndReplace 模式下激活后卸载自身场景。场景未处于预加载状态时无效。
+        /// 将处于 <see cref="SceneLoadMode.PreloadOnly"/> 模式下已预加载的场景激活。
+        /// 若场景未开始加载，将启动加载并在就绪后立即激活。
         /// </summary>
         public void ActivateScene()
         {
             if (_pendingLoad != null)
             {
-                // LoadCoroutine 持有本地 op 引用；设置标志让其退出等待循环。
                 _pendingLoad.allowSceneActivation = true;
-                // 激活完成及回调均在 LoadCoroutine 内处理。
-                return;
             }
-
-            // 场景已完全加载 — 直接应用活动场景状态并触发回调。
-            SceneObj loaded = SceneManager.GetSceneByPath(scene.ScenePath);
-            if (loaded.IsValid() && loaded.isLoaded)
+            else
             {
-                ApplySetActiveScene(loaded);
-                onSceneActivated.Invoke(loaded);
-                if (IsReplaceMode)
+                // 若尚未开始预加载，则以普通加载模式启动。
+                SceneObj existing = SceneManager.GetSceneByPath(scene.ScenePath);
+                if (!existing.IsValid() || !existing.isLoaded)
                 {
-#if UNITY_EDITOR
-                    if (!Application.isPlaying)
-                    {
-                        if (!runInEditMode) return;
-                        SceneObj self = gameObject.scene;
-                        if (self.IsValid() && self.isLoaded)
-                            UnityEditor.SceneManagement.EditorSceneManager.CloseScene(self, true);
-                    }
-                    else
-#endif
-                        StartCoroutine(UnloadCurrentScene());
+                    loadMode = SceneLoadMode.LoadAndActivate;
+                    LoadScene();
                 }
             }
         }
 
-        // ── 卸载 ──────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// 卸载目标场景。若场景正在预加载，先完成激活再卸载。可安全多次调用。
-        /// </summary>
+        /// <summary>异步卸载目标场景。编辑模式下会提示保存。</summary>
         public void UnloadScene()
         {
-            if (!scene.IsValid) return;
+            if (scene == null || !scene.IsValid) return;
 
 #if UNITY_EDITOR
             if (!Application.isPlaying)
             {
                 if (!runInEditMode) return;
-                SceneObj editorScene = SceneManager.GetSceneByPath(scene.ScenePath);
+
+                SceneObj editorScene = UnityEditor.SceneManagement.EditorSceneManager.GetSceneByPath(scene.ScenePath);
                 if (editorScene.IsValid() && editorScene.isLoaded)
                 {
                     UnityEditor.SceneManagement.EditorSceneManager.CloseScene(editorScene, true);
@@ -164,29 +131,39 @@ namespace EA.Timeline
                 return;
             }
 #endif
+
+            if (_loadCoroutine != null)
+            {
+                StopCoroutine(_loadCoroutine);
+                _loadCoroutine = null;
+            }
+
+            // 若仍处于 PreloadOnly 等待激活状态，必须先放行才能正常卸载。
             if (_pendingLoad != null)
             {
-                // 场景处于预加载中：激活它让 Unity 完成内存注册，
-                // 随后在 isDone 后卸载 — 未注册的场景无法直接卸载。
-                var pendingOp = _pendingLoad;
+                _pendingLoad.allowSceneActivation = true;
                 _pendingLoad = null;
-                pendingOp.allowSceneActivation = true;
-                StartCoroutine(WaitThenUnload(pendingOp));
-                return;
             }
 
             SceneObj loaded = SceneManager.GetSceneByPath(scene.ScenePath);
-            if (!loaded.IsValid() || !loaded.isLoaded) return;
-
-            StartCoroutine(UnloadCoroutine(loaded));
+            if (loaded.IsValid() && loaded.isLoaded)
+                StartCoroutine(UnloadCoroutine(loaded));
         }
 
-        private IEnumerator WaitThenUnload(AsyncOperation pendingOp)
+        /// <summary>
+        /// 协程：在后台以异步方式预加载场景。
+        /// 加载完成后立即将场景内所有根 GameObject 设为非激活，随后自动卸载，
+        /// 实现将着色器/网格/纹理提前送入 GPU 显存的预热效果。
+        /// </summary>
+        public IEnumerator WarmupCoroutine()
         {
-            while (!pendingOp.isDone)
-                yield return null;
+            if (scene == null || !scene.IsValid) yield break;
 
-            // 激活完成后立即隐藏根对象，避免出现一帧闪烁。
+            AsyncOperation op = SceneManager.LoadSceneAsync(scene.ScenePath, LoadSceneMode.Additive);
+            if (op == null) yield break;
+
+            yield return op;
+
             SceneObj loaded = SceneManager.GetSceneByPath(scene.ScenePath);
             if (loaded.IsValid() && loaded.isLoaded)
             {
@@ -322,4 +299,3 @@ namespace EA.Timeline
     [Serializable]
     public class SceneLoadedEvent : UnityEvent<SceneObj> { }
 }
-

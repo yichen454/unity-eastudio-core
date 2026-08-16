@@ -2,54 +2,58 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-[DefaultExecutionOrder(-10000)]
-public class EnableFlow : MonoBehaviour
+namespace EAStudio.Core.SceneWarmup
 {
-    [Tooltip("需要依次激活的对象")]
-    public GameObject[] flowsToEnable;
-
-    [Tooltip("单帧激活时间预算(ms)")]
-    public float frameBudgetMs = 40f;
-
-    private List<GameObject> _activeFlows = new List<GameObject>();
-
-    private void Awake()
+    [DefaultExecutionOrder(-10000)]
+    [AddComponentMenu("EAStudio/Scene Warmup/Enable Flow")]
+    public class EnableFlow : MonoBehaviour
     {
-        foreach (var flow in flowsToEnable)
+        [Tooltip("需要依次激活的对象")]
+        public GameObject[] flowsToEnable;
+
+        [Tooltip("单帧激活时间预算(ms)")]
+        public float frameBudgetMs = 40f;
+
+        private List<GameObject> _activeFlows = new List<GameObject>();
+
+        private void Awake()
         {
-            if (flow != null && flow.activeSelf)
+            foreach (var flow in flowsToEnable)
             {
-                flow.SetActive(false);
-                _activeFlows.Add(flow);
+                if (flow != null && flow.activeSelf)
+                {
+                    flow.SetActive(false);
+                    _activeFlows.Add(flow);
+                }
             }
         }
-    }
 
-    private void Start()
-    {
-        StartCoroutine(Flow());
-    }
-
-    private IEnumerator Flow()
-    {
-        yield return new WaitForEndOfFrame();
-        yield return new WaitForEndOfFrame(); // 等待一帧，确保所有对象都已禁用
-        float frameStartTime = Time.realtimeSinceStartup;
-        foreach (var flow in _activeFlows)
+        private void Start()
         {
-            if (flow == null)
-                continue;
+            StartCoroutine(Flow());
+        }
 
-            flow.SetActive(true);
-
-            float elapsedMs =
-                (Time.realtimeSinceStartup - frameStartTime) * 1000f;
-
-            if (elapsedMs >= frameBudgetMs)
+        private IEnumerator Flow()
+        {
+            yield return new WaitForEndOfFrame();
+            yield return new WaitForEndOfFrame(); // 等待一帧，确保所有对象都已禁用
+            float frameStartTime = Time.realtimeSinceStartup;
+            foreach (var flow in _activeFlows)
             {
-                yield return new WaitForEndOfFrame();
+                if (flow == null)
+                    continue;
 
-                frameStartTime = Time.realtimeSinceStartup;
+                flow.SetActive(true);
+
+                float elapsedMs =
+                    (Time.realtimeSinceStartup - frameStartTime) * 1000f;
+
+                if (elapsedMs >= frameBudgetMs)
+                {
+                    yield return new WaitForEndOfFrame();
+
+                    frameStartTime = Time.realtimeSinceStartup;
+                }
             }
         }
     }

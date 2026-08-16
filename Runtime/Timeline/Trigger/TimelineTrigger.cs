@@ -1,14 +1,15 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
 
-namespace EA.Timeline
+namespace EAStudio.Core.Timeline
 {
     /// <summary>
-    /// Timeline 触发器绑定目标。绑定到 <see cref="EA.Timeline.TimelineTriggerTrack"/>。
+    /// Timeline 触发器绑定目标。绑定到 <see cref="TimelineTriggerTrack"/>。
     /// <para>所有场景对象引用均在此配置，clip 按轨道上从左到右的顺序（0 起）对应 <see cref="clips"/> 列表。</para>
     /// </summary>
+    [AddComponentMenu("EAStudio/Timeline/Timeline Trigger")]
     public class TimelineTrigger : MonoBehaviour
     {
         [Serializable]

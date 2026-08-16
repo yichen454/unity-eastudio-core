@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
 
-namespace EA.Timeline
+namespace EAStudio.Core.Timeline
 {
     /// <summary>
     /// <see cref="TimelineTriggerTrack"/> 上的单个 clip。

@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
 
-namespace EA.Timeline.Editor
+namespace EAStudio.Core.Timeline
 {
     [CustomEditor(typeof(TimelineTrigger))]
     public class TimelineTriggerEditor : UnityEditor.Editor
@@ -22,7 +22,7 @@ namespace EA.Timeline.Editor
         private static void RefreshClips(TimelineTrigger trigger)
         {
             // 在场景中查找绑定了此 TimelineTrigger 的 PlayableDirector。
-            var directors = FindObjectsByType<PlayableDirector>(FindObjectsSortMode.None);
+            var directors = Object.FindObjectsByType<PlayableDirector>(FindObjectsSortMode.None);
             foreach (var director in directors)
             {
                 if (director.playableAsset is not TimelineAsset timeline) continue;

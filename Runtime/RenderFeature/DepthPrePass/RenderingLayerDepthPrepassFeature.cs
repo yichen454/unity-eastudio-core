@@ -3,7 +3,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
 
-namespace EA.RenderFeature.DepthPrePass
+namespace EAStudio.Core.RenderFeature
 {
     public class RenderingLayerDepthPrepassFeature : ScriptableRendererFeature
     {
@@ -24,7 +24,7 @@ namespace EA.RenderFeature.DepthPrePass
             [Tooltip("选择用于过滤的渲染图层（支持多选，通过位掩码过滤）。")]
             public int renderingLayerMask = 2;
 
-            [Tooltip("深度图的分辨率缩放选项（用于 GPU 遮挡剔除优化）。")]
+            [Tooltip("深度图的分分辨率缩放选项（用于 GPU 遮挡剔除优化）。")]
             public DepthResolutionScale resolutionScale = DepthResolutionScale.Full;
         }
 
@@ -76,22 +76,21 @@ namespace EA.RenderFeature.DepthPrePass
                 UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
 
-                // 1. 【完美看齐官方】克隆一份相机原生的 RenderTextureDescriptor
-                // 它内部已经自动处理好了 XR 对应的 dimension (Tex2DArray)、msaaSamples、vrSlices 等所有复杂参数
+                // 1. 克隆一份相机原生的 RenderTextureDescriptor
+                // 内部已自动处理 XR 对应的 dimension (Tex2DArray)、msaaSamples、vrSlices 等参数
                 RenderTextureDescriptor depthDesc = cameraData.cameraTargetDescriptor;
 
-                // 2. 仅仅修改宽高分辨率（通过枚举除法计算）
+                // 2. 修改宽高分辨率
                 float scaleFactor = 1.0f / (int)m_Settings.resolutionScale;
                 depthDesc.width = Mathf.Max(1, (int)(depthDesc.width * scaleFactor));
                 depthDesc.height = Mathf.Max(1, (int)(depthDesc.height * scaleFactor));
 
-                // 强制确保格式为纯深度图（因为 cameraTargetDescriptor 默认可能是颜色格式）
+                // 强制确保格式为纯深度图
                 depthDesc.colorFormat = RenderTextureFormat.Depth;
                 depthDesc.depthBufferBits = 24;
                 depthDesc.msaaSamples = 1;
 
                 // 3. 直接通过 RenderTextureDescriptor 构造 TextureDesc
-                // 这样 Render Graph 会自动提取 Descriptor 里的 XR 属性，绝对不会触发 Validate 报错！
                 TextureDesc graphTextureDesc = new TextureDesc(depthDesc)
                 {
                     name = "CustomDepthPrepassTexture"
@@ -104,14 +103,13 @@ namespace EA.RenderFeature.DepthPrePass
                 customData.width = depthDesc.width;
                 customData.height = depthDesc.height;
 
-                // 3. 配置绘制与过滤参数
+                // 4. 配置绘制与过滤参数
                 var sortFlags = cameraData.defaultOpaqueSortFlags;
                 DrawingSettings drawingSettings = RenderingUtils.CreateDrawingSettings(m_ShaderTagId, renderingData, cameraData, lightData, sortFlags);
                 drawingSettings.perObjectData = PerObjectData.None;
                 m_FilteringSettings.renderingLayerMask = (uint)m_Settings.renderingLayerMask;
 
-
-                // 4. 构建 Raster Render Pass
+                // 5. 构建 Raster Render Pass
                 using (var builder = renderGraph.AddRasterRenderPass<PassData>("RenderingLayerDepthPrepass", out var passData, profilingSampler))
                 {
                     var param = new RendererListParams(renderingData.cullResults, drawingSettings, m_FilteringSettings);
@@ -121,18 +119,16 @@ namespace EA.RenderFeature.DepthPrePass
                     builder.SetRenderAttachmentDepth(depthTexture, AccessFlags.Write);
                     builder.SetGlobalTextureAfterPass(depthTexture, m_CustomDepthTextureShaderId);
 
-                    // 5. 【XR 适配核心二】告诉 Render Graph 启用 XR 相关的硬件特性
+                    // 6. XR 适配
                     builder.AllowGlobalStateModification(true);
 
                     if (cameraData.xr.enabled)
                     {
-                        // 适配注视点渲染（Foveated Rasterization）
                         builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering);
-                        // 声明该纹理兼容多视角渲染区域（Multiview 核心标志）
                         builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
                     }
 
-                    // 6. 提交到 GPU 渲染队列
+                    // 7. 提交到 GPU 渲染队列
                     builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                     {
                         context.cmd.ClearRenderTarget(true, false, Color.clear, 1.0f, 0);

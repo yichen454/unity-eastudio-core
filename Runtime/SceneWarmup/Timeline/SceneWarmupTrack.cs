@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
 
-namespace EA.Timeline
+namespace EAStudio.Core.SceneWarmup
 {
     /// <summary>
     /// Timeline track that controls scene loading via a bound <see cref="SceneWarmup"/>.
@@ -16,7 +16,7 @@ namespace EA.Timeline
         public override Playable CreateTrackMixer(PlayableGraph graph, GameObject go, int inputCount)
         {
 #if UNITY_EDITOR
-            var director = go.GetComponent<UnityEngine.Playables.PlayableDirector>();
+            var director = go.GetComponent<PlayableDirector>();
             if (director != null && director.GetGenericBinding(this) is SceneWarmup warmup
                 && warmup.scene != null && !string.IsNullOrEmpty(warmup.scene.SceneName))
             {
