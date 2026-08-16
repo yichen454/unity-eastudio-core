@@ -1,7 +1,11 @@
 {
     "name": "EAStudio.Core.Runtime",
     "rootNamespace": "EAStudio.Core",
-    "references": [],
+    "references": [
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.Timeline"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

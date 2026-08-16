@@ -1,0 +1,78 @@
+// ChannelMerge.compute
+// Composites up to four source textures into a single RGBA output.
+// Each destination channel (R/G/B/A) can be sourced from any channel
+// of its input texture, or filled with a constant when no texture is bound.
+
+#pragma kernel CSMain
+
+// ── Output ────────────────────────────────────────────────────────────────────
+RWTexture2D<float4> Result;
+uint Resolution;
+
+// ── Per-channel source textures ───────────────────────────────────────────────
+Texture2D<float4> TexR;
+Texture2D<float4> TexG;
+Texture2D<float4> TexB;
+Texture2D<float4> TexA;
+
+// ── Per-channel flags / selectors ─────────────────────────────────────────────
+// HasTex*  : 1 if a valid texture is bound, 0 if constant should be used
+// SrcChan* : 0=R  1=G  2=B  3=A  4=Luminance
+// Invert*  : 1 = output 1-value
+// Const*   : constant fill value [0,1] when HasTex==0
+
+uint  HasTexR; uint SrcChanR; uint InvertR; float ConstR;
+uint  HasTexG; uint SrcChanG; uint InvertG; float ConstG;
+uint  HasTexB; uint SrcChanB; uint InvertB; float ConstB;
+uint  HasTexA; uint SrcChanA; uint InvertA; float ConstA;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+float ExtractChannel(float4 color, uint chan)
+{
+    if (chan == 0) return color.r;
+    if (chan == 1) return color.g;
+    if (chan == 2) return color.b;
+    if (chan == 3) return color.a;
+    // chan == 4 : luminance (BT.709)
+    return dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
+}
+
+float SampleChannel(Texture2D<float4> tex, uint hasTex,
+                    uint srcChan, uint inv, float constVal,
+                    int2 coord, uint res)
+{
+    float v;
+    if (hasTex)
+    {
+        // Bilinear UV remap from output resolution to source (point if same size)
+        uint texW, texH;
+        tex.GetDimensions(texW, texH);
+        int2 srcCoord = int2(
+            (int)(((float)coord.x + 0.5) / (float)res * (float)texW),
+            (int)(((float)coord.y + 0.5) / (float)res * (float)texH));
+        srcCoord = clamp(srcCoord, int2(0, 0), int2((int)texW - 1, (int)texH - 1));
+        v = ExtractChannel(tex[srcCoord], srcChan);
+    }
+    else
+    {
+        v = constVal;
+    }
+    if (inv) v = 1.0 - v;
+    return saturate(v);
+}
+
+// ── Kernel ────────────────────────────────────────────────────────────────────
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= Resolution || id.y >= Resolution) return;
+
+    int2 coord = (int2)id.xy;
+
+    float r = SampleChannel(TexR, HasTexR, SrcChanR, InvertR, ConstR, coord, Resolution);
+    float g = SampleChannel(TexG, HasTexG, SrcChanG, InvertG, ConstG, coord, Resolution);
+    float b = SampleChannel(TexB, HasTexB, SrcChanB, InvertB, ConstB, coord, Resolution);
+    float a = SampleChannel(TexA, HasTexA, SrcChanA, InvertA, ConstA, coord, Resolution);
+
+    Result[id.xy] = float4(r, g, b, a);
+}

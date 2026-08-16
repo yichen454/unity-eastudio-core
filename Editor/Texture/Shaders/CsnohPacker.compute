@@ -1,0 +1,130 @@
+// CsnohPacker.compute
+// Packs inputs into two CSNOH textures in a single dispatch:
+//
+//   CS  texture :  RGB = Color albedo   |  A = Smoothness
+//   NOH texture :  RG  = Normal.xy      |  B = AO  |  A = Height
+//
+// Normal input is expected in tangent-space (BC5/DXT5nm or standard RGB).
+// RG in NOH stores the remapped XY: value = normal.xy * 0.5 + 0.5  → [0,1]
+// The consumer reconstructs Z = sqrt(1 - x² - y²).
+
+#pragma kernel CSMain
+
+// ── Outputs ──────────────────────────────────────────────────────────────────
+RWTexture2D<float4> ResultCS;   // Color + Smoothness
+RWTexture2D<float4> ResultNOH;  // Normal.xy + AO + Height
+
+uint Resolution;  // output resolution (both textures are square)
+
+// ── Source textures ───────────────────────────────────────────────────────────
+Texture2D<float4> TexColor;
+Texture2D<float4> TexSmooth;   // smoothness source
+Texture2D<float4> TexNormal;   // tangent-space normal map
+Texture2D<float4> TexAO;
+Texture2D<float4> TexHeight;
+
+// ── Presence flags (0 = use constant) ────────────────────────────────────────
+uint HasColor;
+uint HasSmooth;
+uint HasNormal;
+uint HasAO;
+uint HasHeight;
+
+// ── Per-source channel selectors: 0=R 1=G 2=B 3=A 4=Luma ─────────────────────
+uint ChanSmooth;
+uint ChanAO;
+uint ChanHeight;
+
+// ── Invert flags ──────────────────────────────────────────────────────────────
+uint InvSmooth;
+uint InvAO;
+uint InvHeight;
+
+// ── Constant fallbacks ────────────────────────────────────────────────────────
+float ConstSmooth;
+float ConstAO;
+float ConstHeight;
+
+// ── Normal encoding mode ──────────────────────────────────────────────────────
+// 0 = standard RGB normal map (XYZ stored as RGB * 0.5 + 0.5)
+// 1 = BC5 / DXT5nm swizzle (X in R or A, Y in G, reconstruct Z ignored)
+uint NormalEncoding;
+
+// ─────────────────────────────────────────────────────────────────────────────
+float ExtractChan(float4 c, uint chan)
+{
+    if (chan == 0) return c.r;
+    if (chan == 1) return c.g;
+    if (chan == 2) return c.b;
+    if (chan == 3) return c.a;
+    return dot(c.rgb, float3(0.2126, 0.7152, 0.0722)); // luminance
+}
+
+float4 SampleTex(Texture2D<float4> tex, int2 coord, uint res)
+{
+    uint w, h;
+    tex.GetDimensions(w, h);
+    int2 sc = int2(
+        (int)(((float)coord.x + 0.5) / (float)res * (float)w),
+        (int)(((float)coord.y + 0.5) / (float)res * (float)h));
+    sc = clamp(sc, int2(0,0), int2((int)w-1,(int)h-1));
+    return tex[sc];
+}
+
+float SampleScalar(Texture2D<float4> tex, uint hasTex, uint chan, uint inv,
+                   float constVal, int2 coord, uint res)
+{
+    float v = hasTex ? ExtractChan(SampleTex(tex, coord, res), chan) : constVal;
+    if (inv) v = 1.0 - v;
+    return saturate(v);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= Resolution || id.y >= Resolution) return;
+
+    int2 coord = (int2)id.xy;
+
+    // ── CS : Color ─────────────────────────────────────────────────────────────
+    float3 color = HasColor ? SampleTex(TexColor, coord, Resolution).rgb : float3(1,1,1);
+
+    // ── CS : Smoothness ────────────────────────────────────────────────────────
+    float smooth = SampleScalar(TexSmooth, HasSmooth, ChanSmooth, InvSmooth, ConstSmooth, coord, Resolution);
+
+    // ── NOH : Normal XY ────────────────────────────────────────────────────────
+    float2 normalXY;
+    if (HasNormal)
+    {
+        float4 ns = SampleTex(TexNormal, coord, Resolution);
+        float nx, ny;
+        if (NormalEncoding == 1) // BC5/DXT5nm: X in alpha (or R), Y in G
+        {
+            nx = ns.a * 2.0 - 1.0;
+            ny = ns.g * 2.0 - 1.0;
+        }
+        else // standard RGB
+        {
+            nx = ns.r * 2.0 - 1.0;
+            ny = ns.g * 2.0 - 1.0;
+        }
+        // Store remapped to [0,1]
+        normalXY = float2(nx, ny) * 0.5 + 0.5;
+    }
+    else
+    {
+        // Flat normal: XY = (0,0) in signed → 0.5 in [0,1]
+        normalXY = float2(0.5, 0.5);
+    }
+
+    // ── NOH : AO ──────────────────────────────────────────────────────────────
+    float ao = SampleScalar(TexAO, HasAO, ChanAO, InvAO, ConstAO, coord, Resolution);
+
+    // ── NOH : Height ──────────────────────────────────────────────────────────
+    float height = SampleScalar(TexHeight, HasHeight, ChanHeight, InvHeight, ConstHeight, coord, Resolution);
+
+    // ── Write ──────────────────────────────────────────────────────────────────
+    ResultCS[id.xy]  = float4(color.r, color.g, color.b, smooth);
+    ResultNOH[id.xy] = float4(normalXY.x, normalXY.y, ao, height);
+}

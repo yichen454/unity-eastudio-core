@@ -2,7 +2,13 @@
     "name": "EAStudio.Core.Editor",
     "rootNamespace": "EAStudio.Core.Editor",
     "references": [
-        "EAStudio.Core.Runtime"
+        "EAStudio.Core.Runtime",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Core.Editor",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Universal.Editor",
+        "Unity.Timeline",
+        "Unity.Timeline.Editor"
     ],
     "includePlatforms": [
         "Editor"

@@ -1,0 +1,251 @@
+// NoiseGen.compute
+// GPU noise generation: Perlin, Simplex, Worley, White, FBm, Turbulence
+// Simplex algorithm ported from Stefan Gustavson's public domain implementation.
+
+#pragma kernel CSMain
+
+RWTexture2D<float4> Result;
+
+uint   NoiseType;    // 0=Perlin 1=Simplex 2=Worley 3=White 4=FBm 5=Turbulence
+uint   Resolution;
+float  Scale;
+int    Octaves;
+float  Persistence;
+float  Lacunarity;
+float  Seed;
+uint   Invert;
+uint   Tiling;       // 1 = seamless tiling via 4-D domain mapping
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared hash helpers
+// ─────────────────────────────────────────────────────────────────────────────
+float hash11(float n) { return frac(sin(n) * 43758.5453123); }
+float hash12(float2 p) { return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453123); }
+float2 hash22(float2 p)
+{
+    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
+    return -1.0 + 2.0 * frac(sin(p) * 43758.5453123);
+}
+float hash13(float3 p)
+{
+    p = frac(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return frac(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float3 hash33(float3 p)
+{
+    p = float3(dot(p, float3(127.1, 311.7, 74.7)),
+               dot(p, float3(269.5, 183.3, 246.1)),
+               dot(p, float3(113.5, 271.9, 124.6)));
+    return -1.0 + 2.0 * frac(sin(p) * 43758.5453123);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Perlin noise (2-D gradient noise)
+// ─────────────────────────────────────────────────────────────────────────────
+float perlin2D(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+
+    return lerp(lerp(dot(hash22(i + float2(0,0)), f - float2(0,0)),
+                     dot(hash22(i + float2(1,0)), f - float2(1,0)), u.x),
+                lerp(dot(hash22(i + float2(0,1)), f - float2(0,1)),
+                     dot(hash22(i + float2(1,1)), f - float2(1,1)), u.x), u.y);
+}
+
+// Tiling-aware Perlin: map 2-D coord onto surface of 4-D torus so edges wrap.
+float perlin2DTiling(float2 p, float period)
+{
+    float pi2 = 6.28318530718;
+    float4 d = float4(cos(p.x / period * pi2),
+                      sin(p.x / period * pi2),
+                      cos(p.y / period * pi2),
+                      sin(p.y / period * pi2)) * (period / pi2);
+    // Re-use 3-D hash on pairs (xy / xz)
+    float2 uv = float2(
+        dot(float2(d.x, d.y), float2(127.1, 311.7)),
+        dot(float2(d.z, d.w), float2(269.5, 183.3)));
+    return perlin2D(uv);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simplex noise (Stefan Gustavson, public domain)
+// ─────────────────────────────────────────────────────────────────────────────
+float3 permute(float3 x) { return fmod(((x * 34.0) + 1.0) * x, 289.0); }
+
+float simplex2D(float2 v)
+{
+    const float4 C = float4(0.211324865405187,
+                            0.366025403784439,
+                           -0.577350269189626,
+                            0.024390243902439);
+    float2 i  = floor(v + dot(v, C.yy));
+    float2 x0 = v -   i + dot(i, C.xx);
+    float2 i1  = (x0.x > x0.y) ? float2(1.0, 0.0) : float2(0.0, 1.0);
+    float4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = fmod(i, 289.0);
+    float3 p = permute(permute(i.y + float3(0.0, i1.y, 1.0))
+                       + i.x + float3(0.0, i1.x, 1.0));
+    float3 m = max(0.5 - float3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m * m;
+    m = m * m;
+    float3 x  = 2.0 * frac(p * C.www) - 1.0;
+    float3 h  = abs(x) - 0.5;
+    float3 ox = floor(x + 0.5);
+    float3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+    float3 g;
+    g.x  = a0.x * x0.x  + h.x * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Worley / Cellular noise — F1 (nearest cell distance), normalised to [0,1]
+// ─────────────────────────────────────────────────────────────────────────────
+float worley2D(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+    float minDist = 8.0;
+
+    for (int y = -1; y <= 1; y++)
+    for (int x = -1; x <= 1; x++)
+    {
+        float2 cell   = float2(x, y);
+        float2 offset = hash22(i + cell) * 0.5 + 0.5;
+        float2 diff   = cell + offset - f;
+        float  d      = dot(diff, diff);
+        minDist = min(minDist, d);
+    }
+    return saturate(sqrt(minDist));
+}
+
+float worley2DTiling(float2 p, float period)
+{
+    float2 i = floor(p);
+    float2 f = frac(p);
+    float minDist = 8.0;
+
+    for (int y = -1; y <= 1; y++)
+    for (int x = -1; x <= 1; x++)
+    {
+        float2 cell    = float2(x, y);
+        float2 wrappedI = fmod(i + cell + period, period);
+        float2 offset  = hash22(wrappedI) * 0.5 + 0.5;
+        float2 diff    = cell + offset - f;
+        float  d       = dot(diff, diff);
+        minDist = min(minDist, d);
+    }
+    return saturate(sqrt(minDist));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// White noise
+// ─────────────────────────────────────────────────────────────────────────────
+float whiteNoise(float2 p, float seed)
+{
+    return hash12(p + seed);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FBm & Turbulence (built on Perlin)
+// ─────────────────────────────────────────────────────────────────────────────
+float fbm(float2 p, int octaves, float persistence, float lacunarity, uint tiling, float basePeriod)
+{
+    float value = 0.0;
+    float amplitude = 0.5;
+    float freq = 1.0;
+    float period = basePeriod;
+
+    for (int i = 0; i < octaves; i++)
+    {
+        float n;
+        if (tiling)
+            n = perlin2DTiling(p * freq, period);
+        else
+            n = perlin2D(p * freq);
+        value += amplitude * n;
+        amplitude *= persistence;
+        freq      *= lacunarity;
+        period    *= lacunarity;
+    }
+    return value * 0.5 + 0.5; // remap [-1,1] → [0,1]
+}
+
+float turbulence(float2 p, int octaves, float persistence, float lacunarity, uint tiling, float basePeriod)
+{
+    float value = 0.0;
+    float amplitude = 0.5;
+    float freq = 1.0;
+    float period = basePeriod;
+
+    for (int i = 0; i < octaves; i++)
+    {
+        float n;
+        if (tiling)
+            n = perlin2DTiling(p * freq, period);
+        else
+            n = perlin2D(p * freq);
+        value += amplitude * abs(n);
+        amplitude *= persistence;
+        freq      *= lacunarity;
+        period    *= lacunarity;
+    }
+    return saturate(value);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kernel
+// ─────────────────────────────────────────────────────────────────────────────
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= Resolution || id.y >= Resolution) return;
+
+    float2 uv = (float2(id.xy) + 0.5) / (float)Resolution;
+    float2 p  = uv * Scale + Seed;
+
+    float basePeriod = Scale; // tiling period in noise-space
+
+    float v = 0.0;
+
+    if (NoiseType == 0) // Perlin
+    {
+        if (Tiling)
+            v = perlin2DTiling(p, basePeriod) * 0.5 + 0.5;
+        else
+            v = perlin2D(p) * 0.5 + 0.5;
+    }
+    else if (NoiseType == 1) // Simplex
+    {
+        v = simplex2D(p) * 0.5 + 0.5;
+    }
+    else if (NoiseType == 2) // Worley
+    {
+        if (Tiling)
+            v = worley2DTiling(p, basePeriod);
+        else
+            v = worley2D(p);
+    }
+    else if (NoiseType == 3) // White
+    {
+        v = whiteNoise(float2(id.xy), Seed);
+    }
+    else if (NoiseType == 4) // FBm
+    {
+        v = fbm(p, Octaves, Persistence, Lacunarity, Tiling, basePeriod);
+    }
+    else if (NoiseType == 5) // Turbulence
+    {
+        v = turbulence(p, Octaves, Persistence, Lacunarity, Tiling, basePeriod);
+    }
+
+    if (Invert) v = 1.0 - v;
+    v = saturate(v);
+
+    Result[id.xy] = float4(v, v, v, 1.0);
+}
