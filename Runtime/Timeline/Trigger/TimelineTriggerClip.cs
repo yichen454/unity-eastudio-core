@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
@@ -10,14 +11,37 @@ namespace EAStudio.Core.Timeline
     /// </summary>
     public class TimelineTriggerClip : PlayableAsset, ITimelineClipAsset
     {
+        [SerializeField, HideInInspector]
+        private string clipId;
+
         [Tooltip("显示在 Timeline clip 上的标签，便于区分。同步到 TimelineTrigger.clips[i].label。")]
         public string label = string.Empty;
 
+        public string ClipId => clipId;
+
         public ClipCaps clipCaps => ClipCaps.Blending;
+
+        private void OnValidate()
+        {
+            EnsureClipId();
+        }
+
+        public void EnsureClipId(bool forceNew = false)
+        {
+            if (!forceNew && !string.IsNullOrWhiteSpace(clipId)) return;
+
+            clipId = Guid.NewGuid().ToString("N");
+        }
 
         public override Playable CreatePlayable(PlayableGraph graph, GameObject owner)
         {
-            return ScriptPlayable<TimelineTriggerBehaviour>.Create(graph);
+            EnsureClipId();
+
+            var playable = ScriptPlayable<TimelineTriggerBehaviour>.Create(graph);
+            var behaviour = playable.GetBehaviour();
+            behaviour.clipId = clipId;
+            behaviour.label = label;
+            return playable;
         }
     }
 }

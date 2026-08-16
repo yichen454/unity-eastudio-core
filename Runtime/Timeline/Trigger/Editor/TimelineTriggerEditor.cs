@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
 using UnityEditor;
+using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
@@ -10,9 +11,43 @@ namespace EAStudio.Core.Timeline
     [CustomEditor(typeof(TimelineTrigger))]
     public class TimelineTriggerEditor : UnityEditor.Editor
     {
+        private ReorderableList _clipsList;
+
+        private void OnEnable()
+        {
+            var clipsProperty = serializedObject.FindProperty("clips");
+            _clipsList = new ReorderableList(serializedObject, clipsProperty, true, true, true, true);
+            _clipsList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, "Clips");
+            _clipsList.elementHeightCallback = index =>
+            {
+                var element = clipsProperty.GetArrayElementAtIndex(index);
+                return EditorGUI.GetPropertyHeight(element, true) + EditorGUIUtility.standardVerticalSpacing;
+            };
+            _clipsList.drawElementCallback = (rect, index, active, focused) =>
+            {
+                var element = clipsProperty.GetArrayElementAtIndex(index);
+                var labelProperty = element.FindPropertyRelative("label");
+
+                rect.y += EditorGUIUtility.standardVerticalSpacing;
+                rect.height = EditorGUI.GetPropertyHeight(element, true);
+
+                var displayLabel = string.IsNullOrWhiteSpace(labelProperty.stringValue)
+                    ? $"Clip {index + 1}"
+                    : labelProperty.stringValue;
+                EditorGUI.PropertyField(rect, element, new GUIContent(displayLabel), true);
+            };
+        }
+
         public override void OnInspectorGUI()
         {
-            DrawDefaultInspector();
+            serializedObject.Update();
+
+            DrawPropertiesExcluding(serializedObject, "clips");
+
+            EditorGUILayout.Space();
+            _clipsList.DoLayoutList();
+
+            serializedObject.ApplyModifiedProperties();
 
             EditorGUILayout.Space();
             if (GUILayout.Button("刷新 Clip 列表"))
@@ -37,27 +72,54 @@ namespace EAStudio.Core.Timeline
                     clips.Sort((a, b) => a.start.CompareTo(b.start));
 
                     Undo.RecordObject(trigger, "刷新 TimelineTrigger Clip 列表");
+                    Undo.RecordObject(timeline, "刷新 TimelineTrigger Clip 列表");
 
-                    // 补足不够的条目。
-                    while (trigger.clips.Count < clips.Count)
-                        trigger.clips.Add(new TimelineTrigger.ClipConfig());
-
-                    // 移除多余的条目。
-                    while (trigger.clips.Count > clips.Count)
-                        trigger.clips.RemoveAt(trigger.clips.Count - 1);
-
-                    // 将 clip 上的 label 同步到 ClipConfig.label（仅在为空时补填）。
-                    for (int i = 0; i < clips.Count; i++)
+                    var configById = new Dictionary<string, TimelineTrigger.ClipConfig>();
+                    foreach (var config in trigger.clips)
                     {
-                        if (clips[i].asset is TimelineTriggerClip triggerClip
-                            && !string.IsNullOrWhiteSpace(triggerClip.label)
-                            && string.IsNullOrWhiteSpace(trigger.clips[i].label))
-                        {
-                            trigger.clips[i].label = triggerClip.label;
-                        }
+                        if (config == null || string.IsNullOrWhiteSpace(config.clipId)) continue;
+                        if (!configById.ContainsKey(config.clipId))
+                            configById.Add(config.clipId, config);
                     }
 
+                    var seenClipIds = new HashSet<string>();
+                    var refreshedConfigs = new List<TimelineTrigger.ClipConfig>(clips.Count);
+
+                    for (int i = 0; i < clips.Count; i++)
+                    {
+                        if (clips[i].asset is not TimelineTriggerClip triggerClip) continue;
+
+                        Undo.RecordObject(triggerClip, "刷新 TimelineTrigger Clip 列表");
+
+                        if (string.IsNullOrWhiteSpace(triggerClip.ClipId) || seenClipIds.Contains(triggerClip.ClipId))
+                        {
+                            triggerClip.EnsureClipId(true);
+                            EditorUtility.SetDirty(triggerClip);
+                        }
+
+                        seenClipIds.Add(triggerClip.ClipId);
+
+                        if (!string.IsNullOrWhiteSpace(triggerClip.label))
+                        {
+                            clips[i].displayName = triggerClip.label;
+                        }
+
+                        var config = configById.TryGetValue(triggerClip.ClipId, out var existing)
+                            ? existing
+                            : new TimelineTrigger.ClipConfig();
+
+                        config.clipId = triggerClip.ClipId;
+                        config.label = triggerClip.label;
+
+                        refreshedConfigs.Add(config);
+                    }
+
+                    trigger.clips.Clear();
+                    trigger.clips.AddRange(refreshedConfigs);
+                    trigger.MarkLookupDirty();
+
                     EditorUtility.SetDirty(trigger);
+                    EditorUtility.SetDirty(timeline);
                     Debug.Log($"[TimelineTrigger] '{trigger.name}' 已同步 {clips.Count} 个 clip。");
                     return;
                 }
