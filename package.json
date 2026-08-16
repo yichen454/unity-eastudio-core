@@ -1,0 +1,21 @@
+{
+  "name": "com.eastudio.core",
+  "version": "0.1.0",
+  "displayName": "EAStudio Core",
+  "description": "Core library and utilities for EAStudio Unity projects.",
+  "unity": "6000.0",
+  "keywords": [
+    "eastudio",
+    "core",
+    "utility"
+  ],
+  "author": {
+    "name": "yichen454",
+    "url": "https://github.com/yichen454"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yichen454/com.eastudio.core.git"
+  },
+  "dependencies": {}
+}

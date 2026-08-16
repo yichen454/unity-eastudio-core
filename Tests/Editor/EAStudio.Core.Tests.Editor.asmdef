@@ -1,0 +1,25 @@
+{
+    "name": "EAStudio.Core.Tests.Editor",
+    "rootNamespace": "EAStudio.Core.Editor.Tests",
+    "references": [
+        "EAStudio.Core.Runtime",
+        "EAStudio.Core.Editor",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
