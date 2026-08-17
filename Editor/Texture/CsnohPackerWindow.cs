@@ -45,6 +45,7 @@ namespace EAStudio.Core.Editor
         private NormalEncoding _normalEncoding = NormalEncoding.StandardRGB;
 
         // ── Output ────────────────────────────────────────────────────────────
+        private bool             _autoRes    = true;
         private OutputResolution _resolution = OutputResolution.R1024;
         private OutputFormat     _format     = OutputFormat.PNG;
         private string           _outputPath = "";
@@ -132,13 +133,30 @@ namespace EAStudio.Core.Editor
             EditorGUILayout.LabelField("Normal Map → NOH.rg", EditorStyles.miniBoldLabel);
             _texNormal = (Texture2D)EditorGUILayout.ObjectField(
                 "法线贴图", _texNormal, typeof(Texture2D), false);
-            _normalEncoding = (NormalEncoding)EditorGUILayout.EnumPopup(
-                "编码格式", _normalEncoding);
-            EditorGUILayout.HelpBox(
-                _normalEncoding == NormalEncoding.StandardRGB
-                    ? "标准 RGB 法线图：XY 存在 RG 通道（值域 0-1）"
-                    : "BC5/DXT5nm：X 存在 Alpha，Y 存在 G 通道",
-                MessageType.None);
+
+            // Auto-detect encoding from TextureImporter
+            var detectedEnc = DetectNormalEncoding(_texNormal);
+            if (detectedEnc.HasValue)
+            {
+                _normalEncoding = detectedEnc.Value;
+                using (new EditorGUI.DisabledScope(true))
+                    EditorGUILayout.EnumPopup("编码格式（自动检测）", _normalEncoding);
+                EditorGUILayout.HelpBox(
+                    detectedEnc.Value == NormalEncoding.BC5_DXT5nm
+                        ? "检测到 TextureType=NormalMap，Unity 已将数据重编码为 DXT5nm/BC5 格式"
+                        : "检测到 TextureType=Default/其他，按标准 RGB 法线图处理",
+                    MessageType.Info);
+            }
+            else
+            {
+                _normalEncoding = (NormalEncoding)EditorGUILayout.EnumPopup(
+                    "编码格式", _normalEncoding);
+                EditorGUILayout.HelpBox(
+                    _normalEncoding == NormalEncoding.StandardRGB
+                        ? "标准 RGB 法线图：XY 存在 RG 通道（值域 0-1）"
+                        : "BC5/DXT5nm：X 存在 Alpha，Y 存在 G 通道",
+                    MessageType.None);
+            }
             EditorGUILayout.EndVertical();
 
             // AO
@@ -182,7 +200,18 @@ namespace EAStudio.Core.Editor
         {
             EditorGUILayout.LabelField("输出设置", EditorStyles.boldLabel);
 
-            _resolution = (OutputResolution)EditorGUILayout.EnumPopup("分辨率", _resolution);
+            _autoRes = EditorGUILayout.Toggle("自动匹配输入尺寸", _autoRes);
+            using (new EditorGUI.DisabledScope(_autoRes))
+                _resolution = (OutputResolution)EditorGUILayout.EnumPopup("分辨率", _resolution);
+            if (_autoRes)
+            {
+                int detected = BestRes(_texColor, _texNormal, _texAO, _texHeight, _texSmooth);
+                EditorGUILayout.HelpBox(
+                    detected > 0
+                        ? $"将使用输入贴图最大尺寸：{detected}×{detected}"
+                        : "未检测到输入贴图，将使用下拉框分辨率",
+                    MessageType.None);
+            }
             _format     = (OutputFormat)EditorGUILayout.EnumPopup("格式", _format);
 
             EditorGUILayout.BeginHorizontal();
@@ -238,9 +267,12 @@ namespace EAStudio.Core.Editor
 
             int res = (int)_resolution;
 
-            // Infer resolution from inputs if they exist
-            int autoRes = BestRes(_texColor, _texNormal, _texAO, _texHeight, _texSmooth);
-            if (autoRes > 0) res = autoRes;
+            // Auto-detect resolution from inputs only when the user opted in
+            if (_autoRes)
+            {
+                int autoRes = BestRes(_texColor, _texNormal, _texAO, _texHeight, _texSmooth);
+                if (autoRes > 0) res = autoRes;
+            }
 
             // Create output RenderTextures
             var rtCS  = CreateRT(res);
@@ -260,9 +292,24 @@ namespace EAStudio.Core.Editor
             BindScalar(kernel, "TexSmooth", "HasSmooth", "ChanSmooth", "InvSmooth", "ConstSmooth",
                 _texSmooth, _chanSmooth, _invSmooth, _constSmooth);
 
-            // Normal
-            BindTex(kernel, "TexNormal", "HasNormal", _texNormal);
-            _shader.SetInt("NormalEncoding", (int)_normalEncoding);
+            // Normal — use dedicated path that handles DXT5nm un-swizzle
+            {
+                bool hasNormal = _texNormal != null;
+                Texture normalTex = hasNormal
+                    ? (Texture)EnsureReadableNormal(_texNormal, _normalEncoding)
+                    : Texture2D.grayTexture;
+                _shader.SetTexture(kernel, "TexNormal", normalTex);
+                _shader.SetInt("HasNormal", hasNormal ? 1 : 0);
+
+                // If we pre-unswizzled a DXT5nm normal via Blit, the data is
+                // now in standard RGB layout → always tell the shader StandardRGB.
+                // Only pass BC5_DXT5nm when the texture is already readable in
+                // raw swizzled format and was NOT unswizzled by EnsureReadableNormal.
+                int shaderEnc = (_normalEncoding == NormalEncoding.BC5_DXT5nm)
+                    ? (int)NormalEncoding.StandardRGB   // Blit already un-swizzled
+                    : (int)_normalEncoding;
+                _shader.SetInt("NormalEncoding", shaderEnc);
+            }
 
             // AO (scalar)
             BindScalar(kernel, "TexAO", "HasAO", "ChanAO", "InvAO", "ConstAO",
@@ -288,11 +335,16 @@ namespace EAStudio.Core.Editor
                     return;
                 }
 
+                // Cache CS data now – the request struct is only valid inside this callback
+                var csData = reqCS.GetData<float>().ToArray();
+
+                // CS data cached, RT no longer needed
+                rtCS.Release();
+
                 // Readback NOH after CS is done
                 AsyncGPUReadback.Request(rtNOH, 0, TextureFormat.RGBAFloat, reqNOH =>
                 {
                     _busy = false;
-                    rtCS.Release();
                     rtNOH.Release();
 
                     if (reqNOH.hasError)
@@ -303,8 +355,8 @@ namespace EAStudio.Core.Editor
 
                     string outDir = string.IsNullOrEmpty(_outputPath) ? AutoOutputPath() : _outputPath;
 
-                    WriteTexture(reqCS.GetData<float>(),  res, outDir, _fileNameCS);
-                    WriteTexture(reqNOH.GetData<float>(), res, outDir, _fileNameNOH);
+                    WriteTexture(csData,                   res, outDir, _fileNameCS,  sRGB: true);
+                    WriteTexture(reqNOH.GetData<float>(), res, outDir, _fileNameNOH, sRGB: false);
 
                     AssetDatabase.Refresh();
 
@@ -348,8 +400,15 @@ namespace EAStudio.Core.Editor
             return rt;
         }
 
+        private void WriteTexture(float[] data, int res,
+            string assetDir, string fileName, bool sRGB = true)
+        {
+            using var native = new Unity.Collections.NativeArray<float>(data, Unity.Collections.Allocator.Temp);
+            WriteTexture(native, res, assetDir, fileName, sRGB);
+        }
+
         private void WriteTexture(Unity.Collections.NativeArray<float> data, int res,
-            string assetDir, string fileName)
+            string assetDir, string fileName, bool sRGB = true)
         {
             string absDir = Application.dataPath.Replace("Assets", "") + assetDir;
             if (!Directory.Exists(absDir)) Directory.CreateDirectory(absDir);
@@ -367,6 +426,14 @@ namespace EAStudio.Core.Editor
             DestroyImmediate(tex);
 
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+
+            // Set sRGB on the imported texture
+            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            if (importer != null && importer.sRGBTexture != sRGB)
+            {
+                importer.sRGBTexture = sRGB;
+                importer.SaveAndReimport();
+            }
         }
 
         private static void PingAsset(string assetPath)
@@ -383,6 +450,11 @@ namespace EAStudio.Core.Editor
             return best;
         }
 
+        /// <summary>
+        /// Returns a CPU-readable copy of the texture.
+        /// Uses CopyTexture when possible to avoid any sRGB ↔ Linear conversion;
+        /// falls back to Blit with a Linear RT so the raw texel values are preserved.
+        /// </summary>
         private static Texture2D EnsureReadable(Texture2D src)
         {
             if (src == null) return null;
@@ -392,9 +464,26 @@ namespace EAStudio.Core.Editor
                 var imp = AssetImporter.GetAtPath(path) as TextureImporter;
                 if (imp != null && imp.isReadable) return src;
             }
+
+            // Attempt a GPU-side raw copy (no colour-space conversion)
+            if (SystemInfo.copyTextureSupport != UnityEngine.Rendering.CopyTextureSupport.None)
+            {
+                var copy = new Texture2D(src.width, src.height, src.format, src.mipmapCount > 1, true);
+                Graphics.CopyTexture(src, copy);
+                copy.Apply(false, false);
+                return copy;
+            }
+
+            // Fallback: Blit into a Linear RT so the hardware does NOT apply
+            // sRGB→Linear decoding during the copy.
             var tmp = RenderTexture.GetTemporary(src.width, src.height, 0,
                 RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+            // Use Blit with the source treated as Linear to avoid gamma decoding
+            var prevSRGB = GL.sRGBWrite;
+            GL.sRGBWrite = false;
             Graphics.Blit(src, tmp);
+            GL.sRGBWrite = prevSRGB;
+
             var prev = RenderTexture.active;
             RenderTexture.active = tmp;
             var readable = new Texture2D(src.width, src.height, TextureFormat.RGBAFloat, false, true);
@@ -410,6 +499,62 @@ namespace EAStudio.Core.Editor
             string data = Application.dataPath.Replace("\\", "/");
             abs = abs.Replace("\\", "/");
             return abs.StartsWith(data) ? "Assets" + abs.Substring(data.Length) : abs;
+        }
+
+        /// <summary>
+        /// Detects the normal encoding based on the texture's TextureImporter settings.
+        /// Returns null if the texture has no asset path (e.g. runtime-created).
+        /// </summary>
+        private static NormalEncoding? DetectNormalEncoding(Texture2D tex)
+        {
+            if (tex == null) return null;
+            var path = AssetDatabase.GetAssetPath(tex);
+            if (string.IsNullOrEmpty(path)) return null;
+            var imp = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (imp == null) return null;
+
+            // When Unity imports a texture as NormalMap type, it re-encodes
+            // the data into DXT5nm / BC5 platform format regardless of the
+            // original source image layout.
+            return imp.textureType == TextureImporterType.NormalMap
+                ? NormalEncoding.BC5_DXT5nm
+                : NormalEncoding.StandardRGB;
+        }
+
+        /// <summary>
+        /// Returns a CPU-readable normal map with consistent standard RGB layout
+        /// (X in R, Y in G, Z in B).  When the texture is imported as NormalMap
+        /// type (DXT5nm/BC5), Graphics.Blit automatically un-swizzles the data
+        /// via Unity's internal normal-map decode, so the result is always in
+        /// standard tangent-space RGB format.
+        /// </summary>
+        private static Texture2D EnsureReadableNormal(Texture2D src, NormalEncoding encoding)
+        {
+            if (src == null) return null;
+
+            // If it's an asset imported as NormalMap type, Unity stores it in
+            // platform-specific swizzled format (DXT5nm / BC5).
+            // Graphics.Blit will un-swizzle it to standard RGB for us.
+            // We must NOT use CopyTexture here because that would copy the
+            // raw swizzled data.
+            if (encoding == NormalEncoding.BC5_DXT5nm)
+            {
+                var tmp = RenderTexture.GetTemporary(src.width, src.height, 0,
+                    RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+                Graphics.Blit(src, tmp);
+
+                var prev = RenderTexture.active;
+                RenderTexture.active = tmp;
+                var readable = new Texture2D(src.width, src.height, TextureFormat.RGBAFloat, false, true);
+                readable.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
+                readable.Apply();
+                RenderTexture.active = prev;
+                RenderTexture.ReleaseTemporary(tmp);
+                return readable;
+            }
+
+            // Standard RGB normal map — use the regular path
+            return EnsureReadable(src);
         }
     }
 }

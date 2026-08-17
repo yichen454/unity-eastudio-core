@@ -88,6 +88,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     int2 coord = (int2)id.xy;
 
     // ── CS : Color ─────────────────────────────────────────────────────────────
+    // NOTE: TexColor is bound with raw texel data (sRGB gamma-encoded values).
+    // We intentionally keep color in sRGB/gamma space here because the output
+    // CS texture will be imported with sRGBTexture=true, which means Unity
+    // expects the file to store gamma-encoded values and will decode to linear
+    // at sample time on the GPU. No conversion needed in this shader.
     float3 color = HasColor ? SampleTex(TexColor, coord, Resolution).rgb : float3(1,1,1);
 
     // ── CS : Smoothness ────────────────────────────────────────────────────────
