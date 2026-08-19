@@ -418,7 +418,7 @@ namespace EAStudio.Core.Editor
 
                 string outPath = string.IsNullOrEmpty(_mergeOutputPath)
                     ? DefaultMergePath() : _mergeOutputPath;
-                SaveAndImport(tex, outPath, _mergeFileName, _mergeFormat);
+                SaveAndImport(tex, outPath, _mergeFileName, _mergeFormat, linear: true);
                 DestroyImmediate(tex);
                 Repaint();
             });
@@ -491,7 +491,7 @@ namespace EAStudio.Core.Editor
             return best;
         }
 
-        private static void SaveAndImport(Texture2D tex, string assetDir, string fileName, OutputFormat fmt)
+        private static void SaveAndImport(Texture2D tex, string assetDir, string fileName, OutputFormat fmt, bool linear = false)
         {
             // Ensure the directory exists in the project
             string absDir = Application.dataPath.Replace("Assets", "") + assetDir;
@@ -505,6 +505,17 @@ namespace EAStudio.Core.Editor
             File.WriteAllBytes(absPath, bytes);
 
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+
+            if (linear)
+            {
+                var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+                if (importer != null)
+                {
+                    importer.sRGBTexture = false;
+                    importer.SaveAndReimport();
+                }
+            }
+
             AssetDatabase.Refresh();
 
             var saved = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
