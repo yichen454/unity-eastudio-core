@@ -17,3 +17,7 @@ ExportedObj/
 *.VC.db
 *.DS_Store
 Thumbs.db
+
+~Plan*
+AGENTS.md*
+MEMORY.md*

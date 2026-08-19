@@ -1,0 +1,23 @@
+<linker>
+  <!--
+    防止 IL2CPP 代码裁剪删除埋点系统的序列化类型。
+    若缺少此配置，JsonUtility.FromJson<TrackEnvelope> 在 IL2CPP 构建中
+    会因字段仅通过反射访问而被裁剪，导致静默反序列化失败。
+  -->
+  <assembly fullname="EAStudio.Core.Runtime">
+    <type fullname="EAStudio.Core.EventLog.TrackEnvelope"        preserve="all"/>
+    <type fullname="EAStudio.Core.EventLog.AppInfo"              preserve="all"/>
+    <type fullname="EAStudio.Core.EventLog.DeviceInfo"           preserve="all"/>
+    <type fullname="EAStudio.Core.EventLog.TrackStorageEngine"   preserve="all"/>
+    <type fullname="EAStudio.Core.EventLog.UnifiedTrackReader"   preserve="all"/>
+    <type fullname="EAStudio.Core.EventLog.TrackSyncCoordinator" preserve="all"/>
+    <type fullname="EAStudio.Core.EventLog.TrackRetentionManager" preserve="all"/>
+    <type fullname="EAStudio.Core.EventLog.AnalyticsManager"     preserve="all"/>
+  </assembly>
+  <!-- 保留 TrackRetentionManager 使用的 ZIP 压缩类型 -->
+  <assembly fullname="System.IO.Compression">
+    <type fullname="System.IO.Compression.ZipFile"         preserve="all"/>
+    <type fullname="System.IO.Compression.ZipArchive"      preserve="all"/>
+    <type fullname="System.IO.Compression.ZipArchiveEntry" preserve="all"/>
+  </assembly>
+</linker>
