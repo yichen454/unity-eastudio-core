@@ -1,6 +1,6 @@
 {
   "name": "com.eastudio.core",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "displayName": "EAStudio Core",
   "description": "Core library and utilities for EAStudio Unity projects.",
   "unity": "6000.0",
