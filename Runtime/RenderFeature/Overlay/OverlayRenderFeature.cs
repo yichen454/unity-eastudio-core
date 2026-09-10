@@ -6,14 +6,14 @@ using UnityEngine.Rendering.Universal;
 
 namespace EAStudio.Core.RenderFeature
 {
-    public class UIOverlayRenderFeature : ScriptableRendererFeature
+    public class OverlayRenderFeature : ScriptableRendererFeature
     {
-        private class UIOverlayPass : ScriptableRenderPass
+        private class OverlayPass : ScriptableRenderPass
         {
             private LayerMask m_LayerMask;
             private List<ShaderTagId> m_ShaderTagIdList = new List<ShaderTagId>();
 
-            public UIOverlayPass(LayerMask layerMask)
+            public OverlayPass(LayerMask layerMask)
             {
                 m_LayerMask = layerMask;
             }
@@ -54,7 +54,7 @@ namespace EAStudio.Core.RenderFeature
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
             {
-                string passName = "UIOverlay Render Pass";
+                string passName = "Overlay Render Pass";
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 CullContextData cullContextData = frameData.Get<CullContextData>();
 
@@ -79,13 +79,13 @@ namespace EAStudio.Core.RenderFeature
             }
         }
 
-        private UIOverlayPass m_ScriptablePass;
+        private OverlayPass m_ScriptablePass;
         public LayerMask m_LayerMask;
         public RenderPassEvent renderPassEvent = RenderPassEvent.AfterRenderingTransparents;
 
         public override void Create()
         {
-            m_ScriptablePass = new UIOverlayPass(m_LayerMask)
+            m_ScriptablePass = new OverlayPass(m_LayerMask)
             {
                 renderPassEvent = renderPassEvent,
             };
