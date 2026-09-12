@@ -2,7 +2,7 @@ Shader "Skybox/EAStudio/HDRISky"
 {
     Properties
     {
-        _Tint ("Tint Color", Color) = (1, 1, 1, 1)
+        _Tint ("Tint Color", Color) = (.5, .5, .5, 1)
         [Gamma] _Exposure ("Exposure", Float) = 0.0
         _Multiplier ("Multiplier", Float) = 1.0
         _Rotation ("Rotation", Range(0, 360)) = 0.0
@@ -92,7 +92,9 @@ Shader "Skybox/EAStudio/HDRISky"
                     col = lerp(col, colB, _BlendWeight);
                 }
 
-                col *= exp2(_Exposure) * _Multiplier * _Tint.rgb;
+                // Standard Unity Skybox tint scaling: #808080 (0.5) * unity_ColorSpaceDouble is neutral 1.0
+                col = col * _Tint.rgb * unity_ColorSpaceDouble.rgb;
+                col *= exp2(_Exposure) * _Multiplier;
 
                 return half4(col, 1.0);
             }

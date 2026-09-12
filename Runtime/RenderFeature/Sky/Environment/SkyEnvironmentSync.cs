@@ -108,20 +108,23 @@ namespace EAStudio.Core.RenderFeature.Sky
             {
                 SphericalHarmonicsL2 rotatedSH = SphericalHarmonicsUtils.RotateY(baseSH, -rotation);
                 float intensity = Mathf.Exp(exposure * 0.69314718f) * multiplier;
-                SphericalHarmonicsL2 finalSH = SphericalHarmonicsUtils.Scale(rotatedSH, tint, intensity);
+                // Effective tint scales around neutral #808080 (0.5 * 2.0 = 1.0)
+                Color effectiveTint = tint * 2.0f;
+                SphericalHarmonicsL2 finalSH = SphericalHarmonicsUtils.Scale(rotatedSH, effectiveTint, intensity);
 
                 RenderSettings.ambientMode = AmbientMode.Skybox;
                 RenderSettings.ambientProbe = finalSH;
             }
 
-            // 4. Directly sample Skybox for reflection, avoiding double intensity scaling
-            if (RenderSettings.defaultReflectionMode != DefaultReflectionMode.Skybox)
+            // 4. Custom reflection mode: bind the active HDRI cubemap directly to scene reflections
+            if (RenderSettings.defaultReflectionMode != DefaultReflectionMode.Custom || RenderSettings.customReflectionTexture != cubemap)
             {
-                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
+                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
+                RenderSettings.customReflectionTexture = cubemap;
             }
             RenderSettings.reflectionIntensity = 1.0f;
 
-            // Notify Unity engine to update ambient lighting & reflections from skybox
+            // Notify Unity engine to update ambient lighting probe
             DynamicGI.UpdateEnvironment();
         }
 

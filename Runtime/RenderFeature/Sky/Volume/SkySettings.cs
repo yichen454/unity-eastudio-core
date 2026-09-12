@@ -27,8 +27,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("Linear multiplier for the sky intensity.")]
         public MinFloatParameter multiplier = new MinFloatParameter(1f, 0f);
 
-        [Tooltip("Color tint multiplied with the sky color.")]
-        public ColorParameter tint = new ColorParameter(Color.white, false, false, true);
+        [Tooltip("Color tint multiplied with the sky color. Default is neutral #808080 like Unity standard skybox.")]
+        public ColorParameter tint = new ColorParameter(new Color(0.5f, 0.5f, 0.5f, 1f), false, false, true);
 
         [Tooltip("Update mode for ambient and reflection synchronization.")]
         public EnvUpdateModeParameter updateMode = new EnvUpdateModeParameter(EnvUpdateMode.Realtime);
