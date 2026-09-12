@@ -14,6 +14,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static int s_LastStateHash = -1;
 
         private static readonly int s_TexID = Shader.PropertyToID("_Tex");
+        private static readonly int s_TexBID = Shader.PropertyToID("_TexB");
+        private static readonly int s_BlendWeightID = Shader.PropertyToID("_BlendWeight");
         private static readonly int s_RotationID = Shader.PropertyToID("_Rotation");
         private static readonly int s_ExposureID = Shader.PropertyToID("_Exposure");
         private static readonly int s_MultiplierID = Shader.PropertyToID("_Multiplier");
@@ -28,10 +30,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 s_SkyboxShader = Shader.Find(k_SkyboxShaderName);
 
             if (s_SkyboxShader == null)
-            {
-                // Fallback to Unity built-in Skybox/Cubemap
                 s_SkyboxShader = Shader.Find("Skybox/Cubemap");
-            }
 
             if (s_SkyboxShader != null)
             {
@@ -74,6 +73,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 }
 
                 skyMat.SetTexture(s_TexID, cubemap);
+                skyMat.SetFloat(s_BlendWeightID, 0f);
                 skyMat.SetFloat(s_RotationID, rotation);
                 skyMat.SetFloat(s_ExposureID, exposure);
                 skyMat.SetFloat(s_MultiplierID, multiplier);
@@ -85,7 +85,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 }
             }
 
-            // 2. Check state hash for rate-limiting heavy environment updates
+            // 2. State hash check for rate-limiting
             int hash;
             unchecked
             {
@@ -114,17 +114,14 @@ namespace EAStudio.Core.RenderFeature.Sky
                 RenderSettings.ambientProbe = finalSH;
             }
 
-            // 4. Update reflection probe using Custom mode directly bound to Volume's HDRI cubemap
-            float reflIntensity = Mathf.Exp(exposure * 0.69314718f) * multiplier;
-            RenderSettings.reflectionIntensity = reflIntensity;
-
-            if (RenderSettings.defaultReflectionMode != DefaultReflectionMode.Custom || RenderSettings.customReflectionTexture != cubemap)
+            // 4. Directly sample Skybox for reflection, avoiding double intensity scaling
+            if (RenderSettings.defaultReflectionMode != DefaultReflectionMode.Skybox)
             {
-                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
-                RenderSettings.customReflectionTexture = cubemap;
+                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
             }
+            RenderSettings.reflectionIntensity = 1.0f;
 
-            // Notify Unity engine to update ambient lighting probe
+            // Notify Unity engine to update ambient lighting & reflections from skybox
             DynamicGI.UpdateEnvironment();
         }
 

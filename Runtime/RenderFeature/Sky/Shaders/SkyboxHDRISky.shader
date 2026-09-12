@@ -6,7 +6,9 @@ Shader "Skybox/EAStudio/HDRISky"
         [Gamma] _Exposure ("Exposure", Float) = 0.0
         _Multiplier ("Multiplier", Float) = 1.0
         _Rotation ("Rotation", Range(0, 360)) = 0.0
-        [NoScaleOffset] _Tex ("Cubemap (HDR)", Cube) = "grey" {}
+        [NoScaleOffset] _Tex ("Cubemap A (HDR)", Cube) = "grey" {}
+        [NoScaleOffset] _TexB ("Cubemap B (HDR)", Cube) = "grey" {}
+        _BlendWeight ("Blend Weight", Range(0, 1)) = 0.0
     }
 
     SubShader
@@ -37,11 +39,16 @@ Shader "Skybox/EAStudio/HDRISky"
             SAMPLER(sampler_Tex);
             half4 _Tex_HDR;
 
+            TEXTURECUBE(_TexB);
+            SAMPLER(sampler_TexB);
+            half4 _TexB_HDR;
+
             CBUFFER_START(UnityPerMaterial)
                 float4 _Tint;
                 float _Exposure;
                 float _Multiplier;
                 float _Rotation;
+                float _BlendWeight;
             CBUFFER_END
 
             struct Attributes
@@ -75,8 +82,15 @@ Shader "Skybox/EAStudio/HDRISky"
                 rotatedDir.y = dir.y;
                 rotatedDir.z = -dir.x * s + dir.z * c;
 
-                half4 rawTex = SAMPLE_TEXTURECUBE_LOD(_Tex, sampler_Tex, rotatedDir, 0);
-                half3 col = DecodeHDREnvironment(rawTex, _Tex_HDR);
+                half4 rawTexA = SAMPLE_TEXTURECUBE_LOD(_Tex, sampler_Tex, rotatedDir, 0);
+                half3 col = DecodeHDREnvironment(rawTexA, _Tex_HDR);
+
+                if (_BlendWeight > 0.001)
+                {
+                    half4 rawTexB = SAMPLE_TEXTURECUBE_LOD(_TexB, sampler_TexB, rotatedDir, 0);
+                    half3 colB = DecodeHDREnvironment(rawTexB, _TexB_HDR);
+                    col = lerp(col, colB, _BlendWeight);
+                }
 
                 col *= exp2(_Exposure) * _Multiplier * _Tint.rgb;
 
