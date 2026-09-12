@@ -6,9 +6,11 @@ namespace EAStudio.Core.RenderFeature.Sky
 {
     public class SkyRenderFeature : ScriptableRendererFeature
     {
+        private CloudRenderPass m_CloudRenderPass;
+
         public override void Create()
         {
-            // Capabilities concentrated into Skybox material and Environment sync.
+            m_CloudRenderPass = new CloudRenderPass();
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
@@ -28,6 +30,9 @@ namespace EAStudio.Core.RenderFeature.Sky
                 return;
             }
 
+            ProceduralSky proceduralSky = null;
+
+            // 1. Skybox background evaluation and update
             if (visualEnv.skyType.value == SkyType.HDRI)
             {
                 HDRISky hdriSky = stack.GetComponent<HDRISky>();
@@ -37,14 +42,38 @@ namespace EAStudio.Core.RenderFeature.Sky
                     return;
                 }
 
-                // Update Skybox material properties and synchronize environment lighting with cross-volume transitions
-                SkyEnvironmentSync.UpdateEnvironment(camera, visualEnv, hdriSky);
+                SkyEnvironmentSync.UpdateHDRIEnvironment(camera, visualEnv, hdriSky);
+            }
+            else if (visualEnv.skyType.value == SkyType.Procedural)
+            {
+                proceduralSky = stack.GetComponent<ProceduralSky>();
+                SkyEnvironmentSync.UpdateProceduralEnvironment(camera, visualEnv, proceduralSky);
+            }
+
+            // 2. Cloud layer: Only generate low-res cloud map before opaques
+            // Composition is done directly inside SkyboxProceduralSky without a second pass!
+            if (visualEnv.cloudType.value != CloudType.None && m_CloudRenderPass != null)
+            {
+                CloudSettings cloudSettings = stack.GetComponent<CloudSettings>();
+                if (cloudSettings != null)
+                {
+                    Light sunLight = SkyEnvironmentSync.FindSunLight();
+                    m_CloudRenderPass.Setup(visualEnv, cloudSettings, proceduralSky, sunLight);
+
+                    // Low-Res generation Before Opaques -> binds _CloudTexture globally for shadows & skybox
+                    renderer.EnqueuePass(m_CloudRenderPass.LowRes);
+                }
             }
         }
 
         protected override void Dispose(bool disposing)
         {
             SkyEnvironmentSync.ResetState();
+            if (m_CloudRenderPass != null)
+            {
+                m_CloudRenderPass.Dispose();
+                m_CloudRenderPass = null;
+            }
         }
     }
 }

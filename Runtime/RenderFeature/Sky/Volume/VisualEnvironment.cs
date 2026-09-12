@@ -21,7 +21,8 @@ namespace EAStudio.Core.RenderFeature.Sky
     public enum CloudType
     {
         None = 0,
-        Volumetric = 1
+        Layered = 1,
+        Volumetric = 2
     }
 
     [Serializable]
@@ -55,8 +56,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("Linear intensity multiplier for Environment Lighting (Diffuse SH / Ambient). Matches Lighting -> Environment Lighting -> Intensity Multiplier.")]
         public MinFloatParameter lightingMultiplier = new MinFloatParameter(1f, 0f);
 
-        [Header("Clouds & Atmosphere")]
-        [Tooltip("Type of clouds to render (Reserved for future expansion).")]
+        [Header("Clouds")]
+        [Tooltip("Cloud rendering technique.")]
         public CloudTypeParameter cloudType = new CloudTypeParameter(CloudType.None);
 
         [Header("Wind")]
@@ -64,6 +65,6 @@ namespace EAStudio.Core.RenderFeature.Sky
         public ClampedFloatParameter windOrientation = new ClampedFloatParameter(0f, 0f, 360f);
 
         [Tooltip("Global wind speed in m/s.")]
-        public MinFloatParameter windSpeed = new MinFloatParameter(0f, 0f);
+        public MinFloatParameter windSpeed = new MinFloatParameter(5f, 0f);
     }
 }
