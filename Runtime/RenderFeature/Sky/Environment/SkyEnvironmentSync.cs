@@ -114,18 +114,17 @@ namespace EAStudio.Core.RenderFeature.Sky
                 RenderSettings.ambientProbe = finalSH;
             }
 
-            // 4. Update reflection intensity and mode
+            // 4. Update reflection probe using Custom mode directly bound to Volume's HDRI cubemap
             float reflIntensity = Mathf.Exp(exposure * 0.69314718f) * multiplier;
             RenderSettings.reflectionIntensity = reflIntensity;
 
-            // Use Skybox mode so Unity's internal pipeline generates pre-convolved roughness Mipmaps from the Skybox material,
-            // preventing the un-convolved sharp mirror reflection artifact.
-            if (RenderSettings.defaultReflectionMode != DefaultReflectionMode.Skybox)
+            if (RenderSettings.defaultReflectionMode != DefaultReflectionMode.Custom || RenderSettings.customReflectionTexture != cubemap)
             {
-                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
+                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
+                RenderSettings.customReflectionTexture = cubemap;
             }
 
-            // Notify Unity engine to refresh environment lighting and reflection probe from skybox
+            // Notify Unity engine to update ambient lighting probe
             DynamicGI.UpdateEnvironment();
         }
 

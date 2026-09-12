@@ -31,9 +31,11 @@ Shader "Skybox/EAStudio/HDRISky"
             #pragma target 2.0
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 
             TEXTURECUBE(_Tex);
             SAMPLER(sampler_Tex);
+            half4 _Tex_HDR;
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _Tint;
@@ -73,11 +75,12 @@ Shader "Skybox/EAStudio/HDRISky"
                 rotatedDir.y = dir.y;
                 rotatedDir.z = -dir.x * s + dir.z * c;
 
-                half4 col = SAMPLE_TEXTURECUBE_LOD(_Tex, sampler_Tex, rotatedDir, 0);
+                half4 rawTex = SAMPLE_TEXTURECUBE_LOD(_Tex, sampler_Tex, rotatedDir, 0);
+                half3 col = DecodeHDREnvironment(rawTex, _Tex_HDR);
 
-                col.rgb *= exp2(_Exposure) * _Multiplier * _Tint.rgb;
+                col *= exp2(_Exposure) * _Multiplier * _Tint.rgb;
 
-                return col;
+                return half4(col, 1.0);
             }
             ENDHLSL
         }

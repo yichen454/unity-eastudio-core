@@ -32,12 +32,15 @@ Shader "Hidden/EAStudio/HDRISky"
             #pragma fragment Frag
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 
             TEXTURECUBE(_CubemapA);
             SAMPLER(sampler_CubemapA);
+            half4 _CubemapA_HDR;
 
             TEXTURECUBE(_CubemapB);
             SAMPLER(sampler_CubemapB);
+            half4 _CubemapB_HDR;
 
             CBUFFER_START(UnityPerMaterial)
                 float _BlendWeight;
@@ -78,13 +81,17 @@ Shader "Hidden/EAStudio/HDRISky"
                 rotatedDir.y = worldDir.y;
                 rotatedDir.z = -worldDir.x * s + worldDir.z * c;
 
-                half4 colA = SAMPLE_TEXTURECUBE_LOD(_CubemapA, sampler_CubemapA, rotatedDir, 0);
-                half4 colB = SAMPLE_TEXTURECUBE_LOD(_CubemapB, sampler_CubemapB, rotatedDir, 0);
-                half4 finalCol = lerp(colA, colB, _BlendWeight);
+                half4 rawA = SAMPLE_TEXTURECUBE_LOD(_CubemapA, sampler_CubemapA, rotatedDir, 0);
+                half3 colA = DecodeHDREnvironment(rawA, _CubemapA_HDR);
 
-                finalCol.rgb *= exp2(_Exposure) * _Multiplier * _Tint.rgb;
+                half4 rawB = SAMPLE_TEXTURECUBE_LOD(_CubemapB, sampler_CubemapB, rotatedDir, 0);
+                half3 colB = DecodeHDREnvironment(rawB, _CubemapB_HDR);
 
-                return finalCol;
+                half3 finalCol = lerp(colA, colB, _BlendWeight);
+
+                finalCol *= exp2(_Exposure) * _Multiplier * _Tint.rgb;
+
+                return half4(finalCol, 1.0);
             }
             ENDHLSL
         }
