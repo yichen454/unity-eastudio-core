@@ -55,20 +55,19 @@ Shader "Hidden/EAStudio/HDRISky"
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
-                float2 uv : TEXCOORD0;
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
                 output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID, UNITY_RAW_FAR_CLIP_VALUE);
-                output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
                 return output;
             }
 
             half4 Frag(Varyings input) : SV_Target
             {
-                float3 worldPos = ComputeWorldSpacePosition(input.positionCS, UNITY_MATRIX_I_VP);
+                float2 uv = input.positionCS.xy / _ScaledScreenParams.xy;
+                float3 worldPos = ComputeWorldSpacePosition(uv, UNITY_RAW_FAR_CLIP_VALUE, UNITY_MATRIX_I_VP);
                 float3 worldDir = normalize(worldPos - _WorldSpaceCameraPos.xyz);
 
                 float rad = radians(_SkyRotation);

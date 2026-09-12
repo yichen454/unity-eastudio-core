@@ -7,8 +7,11 @@ namespace EAStudio.Core.RenderFeature.Sky
     public class SkyRenderFeature : ScriptableRendererFeature
     {
         [Header("Settings")]
-        [Tooltip("When to execute the sky pass. Default is BeforeRenderingSkybox.")]
-        public RenderPassEvent renderPassEvent = RenderPassEvent.BeforeRenderingSkybox;
+        [Tooltip("Whether to use a dedicated RenderGraph raster pass to draw the sky on top of the native skybox.")]
+        public bool useRenderGraphPass = false;
+
+        [Tooltip("When to execute the sky pass if useRenderGraphPass is true.")]
+        public RenderPassEvent renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
 
         private const string k_ShaderName = "Hidden/EAStudio/HDRISky";
         private Shader m_Shader;
@@ -40,10 +43,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 m_Shader = Shader.Find(k_ShaderName);
 
             if (m_Shader == null)
-            {
-                Debug.LogWarning($"[SkyRenderFeature] Cannot find shader: {k_ShaderName}");
                 return false;
-            }
 
             m_Material = CoreUtils.CreateEngineMaterial(m_Shader);
             return m_Material != null;
@@ -52,10 +52,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             Camera camera = renderingData.cameraData.camera;
-            if (camera == null)
-                return;
-
-            if (camera.cameraType == CameraType.Preview)
+            if (camera == null || camera.cameraType == CameraType.Preview)
                 return;
 
             VolumeStack stack = VolumeManager.instance.stack;
@@ -64,29 +61,37 @@ namespace EAStudio.Core.RenderFeature.Sky
 
             VisualEnvironment visualEnv = stack.GetComponent<VisualEnvironment>();
             if (visualEnv == null || visualEnv.skyType.value == SkyType.None)
+            {
+                SkyEnvironmentSync.RestoreOriginalSkybox();
                 return;
+            }
 
             if (visualEnv.skyType.value == SkyType.HDRI)
             {
                 HDRISky hdriSky = stack.GetComponent<HDRISky>();
                 if (hdriSky == null || hdriSky.hdriSky.value == null)
+                {
+                    SkyEnvironmentSync.RestoreOriginalSkybox();
                     return;
+                }
 
-                if (!EnsureMaterial())
-                    return;
-
-                m_Material.SetTexture(s_CubemapAID, hdriSky.hdriSky.value);
-                m_Material.SetFloat(s_BlendWeightID, 0f);
-                m_Material.SetFloat(s_SkyRotationID, hdriSky.rotation.value);
-                m_Material.SetFloat(s_ExposureID, hdriSky.exposure.value);
-                m_Material.SetFloat(s_MultiplierID, hdriSky.multiplier.value);
-                m_Material.SetColor(s_TintID, hdriSky.tint.value);
-
+                // Synchronize Skybox Material and Environment Lighting
                 SkyEnvironmentSync.UpdateEnvironment(visualEnv, hdriSky);
 
-                m_SkyPass.renderPassEvent = renderPassEvent;
-                m_SkyPass.Setup(m_Material);
-                renderer.EnqueuePass(m_SkyPass);
+                // Optional RenderGraph override pass
+                if (useRenderGraphPass && EnsureMaterial())
+                {
+                    m_Material.SetTexture(s_CubemapAID, hdriSky.hdriSky.value);
+                    m_Material.SetFloat(s_BlendWeightID, 0f);
+                    m_Material.SetFloat(s_SkyRotationID, hdriSky.rotation.value);
+                    m_Material.SetFloat(s_ExposureID, hdriSky.exposure.value);
+                    m_Material.SetFloat(s_MultiplierID, hdriSky.multiplier.value);
+                    m_Material.SetColor(s_TintID, hdriSky.tint.value);
+
+                    m_SkyPass.renderPassEvent = renderPassEvent;
+                    m_SkyPass.Setup(m_Material);
+                    renderer.EnqueuePass(m_SkyPass);
+                }
             }
         }
 
