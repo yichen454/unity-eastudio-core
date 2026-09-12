@@ -3,8 +3,7 @@ Shader "Skybox/EAStudio/HDRISky"
     Properties
     {
         _Tint ("Tint Color", Color) = (.5, .5, .5, 1)
-        [Gamma] _Exposure ("Exposure", Float) = 0.0
-        _Multiplier ("Multiplier", Float) = 1.0
+        [Gamma] _Exposure ("Exposure", Float) = 1.0
         _Rotation ("Rotation", Range(0, 360)) = 0.0
         [NoScaleOffset] _Tex ("Cubemap A (HDR)", Cube) = "grey" {}
         [NoScaleOffset] _TexB ("Cubemap B (HDR)", Cube) = "grey" {}
@@ -31,9 +30,16 @@ Shader "Skybox/EAStudio/HDRISky"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma target 2.0
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
+
+            #if !defined(UNITY_COLORSPACE_GAMMA)
+            #define unity_ColorSpaceDouble half4(4.59479380, 4.59479380, 4.59479380, 2.0)
+            #else
+            #define unity_ColorSpaceDouble half4(2.0, 2.0, 2.0, 2.0)
+            #endif
 
             TEXTURECUBE(_Tex);
             SAMPLER(sampler_Tex);
@@ -46,7 +52,6 @@ Shader "Skybox/EAStudio/HDRISky"
             CBUFFER_START(UnityPerMaterial)
                 float4 _Tint;
                 float _Exposure;
-                float _Multiplier;
                 float _Rotation;
                 float _BlendWeight;
             CBUFFER_END
@@ -54,17 +59,22 @@ Shader "Skybox/EAStudio/HDRISky"
             struct Attributes
             {
                 float4 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
                 float3 texcoord : TEXCOORD0;
+                UNITY_VERTEX_OUTPUT_STEREO
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 output.texcoord = input.positionOS.xyz;
                 return output;
@@ -72,6 +82,8 @@ Shader "Skybox/EAStudio/HDRISky"
 
             half4 Frag(Varyings input) : SV_Target
             {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
                 float3 dir = normalize(input.texcoord);
 
                 float rad = radians(_Rotation);
@@ -94,7 +106,9 @@ Shader "Skybox/EAStudio/HDRISky"
 
                 // Standard Unity Skybox tint scaling: #808080 (0.5) * unity_ColorSpaceDouble is neutral 1.0
                 col = col * _Tint.rgb * unity_ColorSpaceDouble.rgb;
-                col *= exp2(_Exposure) * _Multiplier;
+
+                // Pure linear exposure multiplier (1.0 = normal, 2.0 = 2x brighter)
+                col *= _Exposure;
 
                 return half4(col, 1.0);
             }

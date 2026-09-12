@@ -48,12 +48,18 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("Type of sky to display and evaluate.")]
         public SkyTypeParameter skyType = new SkyTypeParameter(SkyType.HDRI);
 
-        [Tooltip("Evaluation mode for ambient probe (SH) and environment reflections.")]
+        [Tooltip("Evaluation mode for ambient probe (SH).")]
         public SkyAmbientModeParameter skyAmbientMode = new SkyAmbientModeParameter(SkyAmbientMode.Realtime);
 
+        [Header("Environment Lighting")]
+        [Tooltip("Linear intensity multiplier for Environment Lighting (Diffuse SH / Ambient). Matches Lighting -> Environment Lighting -> Intensity Multiplier.")]
+        public MinFloatParameter lightingMultiplier = new MinFloatParameter(1f, 0f);
+
+        [Header("Clouds & Atmosphere")]
         [Tooltip("Type of clouds to render (Reserved for future expansion).")]
         public CloudTypeParameter cloudType = new CloudTypeParameter(CloudType.None);
 
+        [Header("Wind")]
         [Tooltip("Global wind orientation in degrees.")]
         public ClampedFloatParameter windOrientation = new ClampedFloatParameter(0f, 0f, 360f);
 

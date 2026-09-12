@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace EAStudio.Core.RenderFeature.Sky
 {
@@ -18,8 +20,16 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_BlendWeightID = Shader.PropertyToID("_BlendWeight");
         private static readonly int s_RotationID = Shader.PropertyToID("_Rotation");
         private static readonly int s_ExposureID = Shader.PropertyToID("_Exposure");
-        private static readonly int s_MultiplierID = Shader.PropertyToID("_Multiplier");
         private static readonly int s_TintID = Shader.PropertyToID("_Tint");
+
+        private struct ActiveSkyEntry
+        {
+            public float priority;
+            public float weight;
+            public Cubemap cubemap;
+        }
+
+        private static readonly List<ActiveSkyEntry> s_ActiveSkies = new List<ActiveSkyEntry>(4);
 
         private static Material EnsureMaterial()
         {
@@ -41,8 +51,57 @@ namespace EAStudio.Core.RenderFeature.Sky
             return s_SkyboxMaterial;
         }
 
-        public static void UpdateEnvironment(VisualEnvironment visualEnv, HDRISky hdriSky)
+        private static void CleanupLegacyProbes()
         {
+            GameObject oldProbe = GameObject.Find("[SkyVolume_ReflectionProbe]");
+            if (oldProbe != null)
+            {
+                CoreUtils.Destroy(oldProbe);
+            }
+        }
+
+        private static float ComputeVolumeWeight(Volume volume, Vector3 triggerPos)
+        {
+            if (volume == null || !volume.enabled || volume.profile == null || volume.weight <= 0f)
+                return 0f;
+
+            if (volume.isGlobal)
+                return Mathf.Clamp01(volume.weight);
+
+            var colliders = volume.colliders;
+            if (colliders == null || colliders.Count == 0)
+                return 0f;
+
+            float closestDistanceSqr = float.PositiveInfinity;
+            for (int i = 0; i < colliders.Count; i++)
+            {
+                var collider = colliders[i];
+                if (collider == null || !collider.enabled)
+                    continue;
+
+                var closestPoint = collider.ClosestPoint(triggerPos);
+                float d = (closestPoint - triggerPos).sqrMagnitude;
+                if (d < closestDistanceSqr)
+                    closestDistanceSqr = d;
+            }
+
+            float blendDist = volume.blendDistance;
+            float blendDistSqr = blendDist * blendDist;
+
+            if (closestDistanceSqr > blendDistSqr)
+                return 0f;
+
+            float interpFactor = 1f;
+            if (blendDistSqr > 0f)
+                interpFactor = 1f - (closestDistanceSqr / blendDistSqr);
+
+            return Mathf.Clamp01(interpFactor * Mathf.Clamp01(volume.weight));
+        }
+
+        public static void UpdateEnvironment(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky)
+        {
+            CleanupLegacyProbes();
+
             if (visualEnv == null || visualEnv.skyAmbientMode.value == SkyAmbientMode.Off)
             {
                 RestoreOriginalSkybox();
@@ -55,14 +114,83 @@ namespace EAStudio.Core.RenderFeature.Sky
                 return;
             }
 
-            Cubemap cubemap = hdriSky.hdriSky.value;
+            // 1. Gather active volumes to compute transition blend weight
+            Cubemap cubemapA = hdriSky.hdriSky.value;
+            Cubemap cubemapB = null;
+            float blendWeight = 0f;
+
+            if (camera != null)
+            {
+                s_ActiveSkies.Clear();
+                Vector3 camPos = camera.transform.position;
+                LayerMask mask = 1;
+                if (camera.TryGetComponent<UniversalAdditionalCameraData>(out var additionalData))
+                {
+                    mask = additionalData.volumeLayerMask;
+                }
+                Volume[] volumes = VolumeManager.instance.GetVolumes(mask);
+
+                for (int i = 0; i < volumes.Length; i++)
+                {
+                    Volume vol = volumes[i];
+                    if (vol == null || vol.profile == null)
+                        continue;
+
+                    if (vol.profile.TryGet<HDRISky>(out var sky) && sky.active && sky.hdriSky.value != null)
+                    {
+                        float w = ComputeVolumeWeight(vol, camPos);
+                        if (w > 0.001f)
+                        {
+                            s_ActiveSkies.Add(new ActiveSkyEntry
+                            {
+                                priority = vol.priority,
+                                weight = w,
+                                cubemap = sky.hdriSky.value
+                            });
+                        }
+                    }
+                }
+
+                s_ActiveSkies.Sort((a, b) => a.priority.CompareTo(b.priority));
+
+                if (s_ActiveSkies.Count >= 2)
+                {
+                    var baseSky = s_ActiveSkies[s_ActiveSkies.Count - 2];
+                    var topSky = s_ActiveSkies[s_ActiveSkies.Count - 1];
+
+                    if (baseSky.cubemap != topSky.cubemap)
+                    {
+                        cubemapA = baseSky.cubemap;
+                        cubemapB = topSky.cubemap;
+                        blendWeight = topSky.weight;
+
+                        if (blendWeight >= 0.999f)
+                        {
+                            cubemapA = topSky.cubemap;
+                            cubemapB = null;
+                            blendWeight = 0f;
+                        }
+                    }
+                    else
+                    {
+                        cubemapA = topSky.cubemap;
+                        blendWeight = 0f;
+                    }
+                }
+                else if (s_ActiveSkies.Count == 1)
+                {
+                    cubemapA = s_ActiveSkies[0].cubemap;
+                    blendWeight = 0f;
+                }
+            }
+
             float rotation = hdriSky.rotation.value;
             float exposure = hdriSky.exposure.value;
-            float multiplier = hdriSky.multiplier.value;
+            float lightingMultiplier = visualEnv.lightingMultiplier.value;
             Color tint = hdriSky.tint.value;
             SkyAmbientMode ambientMode = visualEnv.skyAmbientMode.value;
 
-            // 1. Manage and update Skybox Material
+            // 2. Manage and update Skybox Material (XR Multiview & cross-fade supported)
             Material skyMat = EnsureMaterial();
             if (skyMat != null)
             {
@@ -72,11 +200,11 @@ namespace EAStudio.Core.RenderFeature.Sky
                     s_HasStoredOriginal = true;
                 }
 
-                skyMat.SetTexture(s_TexID, cubemap);
-                skyMat.SetFloat(s_BlendWeightID, 0f);
+                skyMat.SetTexture(s_TexID, cubemapA);
+                skyMat.SetTexture(s_TexBID, cubemapB != null ? cubemapB : cubemapA);
+                skyMat.SetFloat(s_BlendWeightID, blendWeight);
                 skyMat.SetFloat(s_RotationID, rotation);
                 skyMat.SetFloat(s_ExposureID, exposure);
-                skyMat.SetFloat(s_MultiplierID, multiplier);
                 skyMat.SetColor(s_TintID, tint);
 
                 if (RenderSettings.skybox != skyMat)
@@ -85,15 +213,17 @@ namespace EAStudio.Core.RenderFeature.Sky
                 }
             }
 
-            // 2. State hash check for rate-limiting
+            // 3. State hash check for rate-limiting heavy environment updates
             int hash;
             unchecked
             {
                 hash = 17;
-                hash = hash * 31 + cubemap.GetInstanceID();
+                hash = hash * 31 + cubemapA.GetInstanceID();
+                hash = hash * 31 + (cubemapB != null ? cubemapB.GetInstanceID() : 0);
+                hash = hash * 31 + blendWeight.GetHashCode();
                 hash = hash * 31 + rotation.GetHashCode();
                 hash = hash * 31 + exposure.GetHashCode();
-                hash = hash * 31 + multiplier.GetHashCode();
+                hash = hash * 31 + lightingMultiplier.GetHashCode();
                 hash = hash * 31 + tint.GetHashCode();
                 hash = hash * 31 + ((int)ambientMode).GetHashCode();
 
@@ -103,33 +233,34 @@ namespace EAStudio.Core.RenderFeature.Sky
                 s_LastStateHash = hash;
             }
 
-            // 3. Update ambient spherical harmonics
-            if (SphericalHarmonicsUtils.ExtractFromCubemap(cubemap, out var baseSH))
+            // 4. Update ambient spherical harmonics (SH) (interpolated between both skies if transitioning)
+            float lightingIntensity = lightingMultiplier;
+            if (SphericalHarmonicsUtils.ExtractFromCubemap(cubemapA, out var baseSHA))
             {
-                SphericalHarmonicsL2 rotatedSH = SphericalHarmonicsUtils.RotateY(baseSH, -rotation);
-                float intensity = Mathf.Exp(exposure * 0.69314718f) * multiplier;
-                // Effective tint scales around neutral #808080 (0.5 * 2.0 = 1.0)
+                SphericalHarmonicsL2 blendedBaseSH = baseSHA;
+
+                if (blendWeight > 0.001f && cubemapB != null && SphericalHarmonicsUtils.ExtractFromCubemap(cubemapB, out var baseSHB))
+                {
+                    blendedBaseSH = SphericalHarmonicsUtils.Lerp(baseSHA, baseSHB, blendWeight);
+                }
+
+                SphericalHarmonicsL2 rotatedSH = SphericalHarmonicsUtils.RotateY(blendedBaseSH, -rotation);
                 Color effectiveTint = tint * 2.0f;
-                SphericalHarmonicsL2 finalSH = SphericalHarmonicsUtils.Scale(rotatedSH, effectiveTint, intensity);
+                SphericalHarmonicsL2 finalSH = SphericalHarmonicsUtils.Scale(rotatedSH, effectiveTint, lightingIntensity);
 
                 RenderSettings.ambientMode = AmbientMode.Skybox;
                 RenderSettings.ambientProbe = finalSH;
             }
+            RenderSettings.ambientIntensity = lightingIntensity;
 
-            // 4. Custom reflection mode: bind the active HDRI cubemap directly to scene reflections
-            if (RenderSettings.defaultReflectionMode != DefaultReflectionMode.Custom || RenderSettings.customReflectionTexture != cubemap)
-            {
-                RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
-                RenderSettings.customReflectionTexture = cubemap;
-            }
-            RenderSettings.reflectionIntensity = 1.0f;
-
-            // Notify Unity engine to update ambient lighting probe
+            // Notify Unity engine
             DynamicGI.UpdateEnvironment();
         }
 
         public static void RestoreOriginalSkybox()
         {
+            CleanupLegacyProbes();
+
             if (s_HasStoredOriginal)
             {
                 if (RenderSettings.skybox == s_SkyboxMaterial)
@@ -137,6 +268,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                     RenderSettings.skybox = s_OriginalSkyboxMaterial;
                 }
             }
+
             s_LastStateHash = -1;
         }
 
@@ -145,6 +277,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             RestoreOriginalSkybox();
             CoreUtils.Destroy(s_SkyboxMaterial);
             s_SkyboxMaterial = null;
+
             s_LastStateHash = -1;
             s_HasStoredOriginal = false;
         }

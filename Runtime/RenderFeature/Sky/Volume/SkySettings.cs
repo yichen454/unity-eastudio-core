@@ -21,11 +21,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("Y-axis rotation of the skybox in degrees.")]
         public ClampedFloatParameter rotation = new ClampedFloatParameter(0f, 0f, 360f);
 
-        [Tooltip("Exposure value (in EV) applied to the sky.")]
-        public FloatParameter exposure = new FloatParameter(0f);
-
-        [Tooltip("Linear multiplier for the sky intensity.")]
-        public MinFloatParameter multiplier = new MinFloatParameter(1f, 0f);
+        [Tooltip("Linear exposure multiplier for the skybox (1.0 = normal, 2.0 = 2x brighter).")]
+        public MinFloatParameter exposure = new MinFloatParameter(1f, 0f);
 
         [Tooltip("Color tint multiplied with the sky color. Default is neutral #808080 like Unity standard skybox.")]
         public ColorParameter tint = new ColorParameter(new Color(0.5f, 0.5f, 0.5f, 1f), false, false, true);
@@ -40,7 +37,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 int hash = 17;
                 hash = hash * 31 + rotation.value.GetHashCode();
                 hash = hash * 31 + exposure.value.GetHashCode();
-                hash = hash * 31 + multiplier.value.GetHashCode();
                 hash = hash * 31 + tint.value.GetHashCode();
                 hash = hash * 31 + updateMode.value.GetHashCode();
                 return hash;

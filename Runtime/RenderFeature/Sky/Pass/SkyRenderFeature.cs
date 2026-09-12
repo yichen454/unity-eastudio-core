@@ -8,7 +8,7 @@ namespace EAStudio.Core.RenderFeature.Sky
     {
         public override void Create()
         {
-            // Capabilities concentrated into Skybox material and Environment sync; no custom drawing pass required.
+            // Capabilities concentrated into Skybox material and Environment sync.
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
@@ -37,8 +37,8 @@ namespace EAStudio.Core.RenderFeature.Sky
                     return;
                 }
 
-                // Update Skybox material properties and synchronize environment lighting
-                SkyEnvironmentSync.UpdateEnvironment(visualEnv, hdriSky);
+                // Update Skybox material properties and synchronize environment lighting with cross-volume transitions
+                SkyEnvironmentSync.UpdateEnvironment(camera, visualEnv, hdriSky);
             }
         }
 

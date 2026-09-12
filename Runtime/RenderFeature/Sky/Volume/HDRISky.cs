@@ -16,15 +16,6 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("The HDRI Cubemap texture.")]
         public CubemapParameter hdriSky = new CubemapParameter(null);
 
-        [Tooltip("Desired illuminance in Lux (Reserved for photometric physical lighting).")]
-        public MinFloatParameter desiredLux = new MinFloatParameter(1000f, 0f);
-
-        [Tooltip("Enable UV flow distortion (Reserved for animated wind simulation).")]
-        public BoolParameter enableDistortion = new BoolParameter(false);
-
-        [Tooltip("Distortion flow speed (Reserved).")]
-        public MinFloatParameter distortionFlowSpeed = new MinFloatParameter(0.1f, 0f);
-
         public override int GetParameterHashCode()
         {
             unchecked
