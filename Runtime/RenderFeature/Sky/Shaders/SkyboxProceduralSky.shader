@@ -16,6 +16,20 @@ Shader "Skybox/EAStudio/ProceduralSky"
         _GroundFade ("Ground Transition Width", Range(0.01, 1.0)) = 0.25
         _NightSkyColor ("Night Sky Color", Color) = (0.02, 0.03, 0.06, 1)
 
+        [Header(Night Sky HDRI)]
+        [NoScaleOffset] _NightSkyMap ("Night Sky Cubemap", Cube) = "" {}
+        _NightExposure ("Night Sky Exposure", Float) = 1.0
+        _NightRotation ("Night Sky Rotation", Range(0, 360)) = 0.0
+        [HideInInspector] _HasNightSkyMap ("Has Night Sky Map", Float) = 0.0
+
+        [Header(Moon)]
+        [NoScaleOffset] _MoonTexture ("Moon Surface Texture", 2D) = "white" {}
+        [HideInInspector] _MoonDirection ("Moon Direction", Vector) = (0, -0.707, -0.707, 0)
+        [HideInInspector] _MoonLightLocal ("Moon Light Local Direction", Vector) = (0, 0, 1, 0)
+        [HideInInspector] _MoonParams ("Moon Parameters (Size, Brightness, Earthshine, Halo)", Vector) = (0.06, 1.2, 0.04, 0.5)
+        [HideInInspector] _MoonColor ("Moon Color", Color) = (0.92, 0.95, 1.0, 1)
+        [HideInInspector] _EnableMoon ("Enable Moon", Float) = 1.0
+
         [HideInInspector] _SunDirection ("Sun Direction", Vector) = (0, 0.707, 0.707, 0)
         [HideInInspector] _SunColor ("Sun Color", Color) = (1, 1, 1, 1)
     }
@@ -52,6 +66,11 @@ Shader "Skybox/EAStudio/ProceduralSky"
             #endif
 
             TEXTURE2D(_CloudTexture);
+            TEXTURECUBE(_NightSkyMap);
+            SAMPLER(sampler_NightSkyMap);
+            float4 _NightSkyMap_HDR;
+            TEXTURE2D(_MoonTexture);
+            SAMPLER(sampler_MoonTexture);
 
             CBUFFER_START(UnityPerMaterial)
                 float _Exposure;
@@ -66,6 +85,16 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float4 _NightSkyColor;
                 float4 _SunDirection;
                 float4 _SunColor;
+
+                float _NightExposure;
+                float _NightRotation;
+                float _HasNightSkyMap;
+
+                float4 _MoonDirection;
+                float4 _MoonLightLocal;
+                float4 _MoonParams;
+                float4 _MoonColor;
+                float _EnableMoon;
             CBUFFER_END
 
             struct Attributes
@@ -143,9 +172,75 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 return float2(-b - h, -b + h);
             }
 
+            float3 RotateAroundY(float3 v, float deg)
+            {
+                float rad = deg * 0.0174532925;
+                float s, c;
+                sincos(rad, s, c);
+                return float3(v.x * c - v.z * s, v.y, v.x * s + v.z * c);
+            }
+
             float PhaseRayleigh(float costh)
             {
                 return (1.0 + costh * costh) * 0.06;
+            }
+
+            float4 CalcMoon(float3 rayDir)
+            {
+                if (_EnableMoon < 0.5)
+                    return float4(0, 0, 0, 0);
+
+                float3 moonDir = _MoonDirection.xyz;
+                float lenSq = dot(moonDir, moonDir);
+                if (lenSq < 0.001)
+                    return float4(0, 0, 0, 0);
+                moonDir = moonDir * rsqrt(lenSq);
+
+                // Orthonormal basis for moon billboard projection
+                float3 upRef = abs(moonDir.y) > 0.99 ? float3(0, 0, 1) : float3(0, 1, 0);
+                float3 moonRight = normalize(cross(upRef, moonDir));
+                float3 moonUp = cross(moonDir, moonRight);
+
+                float eyeCos = dot(rayDir, moonDir);
+                if (eyeCos <= 0.0)
+                    return float4(0, 0, 0, 0);
+
+                // Angular projection
+                float2 uvOffset = float2(dot(rayDir, moonRight), dot(rayDir, moonUp)) / eyeCos;
+                float moonRadius = clamp(_MoonParams.x, 0.008, 0.25) * 0.45;
+                float2 normUV = uvOffset / moonRadius;
+                float r2 = dot(normUV, normUV);
+
+                float3 moonColor = float3(0, 0, 0);
+                float moonMask = 0.0;
+
+                // Inside the spherical moon disc
+                if (r2 <= 1.05)
+                {
+                    float discEdge = smoothstep(1.02, 0.96, sqrt(r2));
+                    float z = sqrt(saturate(1.0 - r2));
+                    float3 localNormal = normalize(float3(normUV.x, normUV.y, z));
+
+                    // NASA 2:1 equirectangular spherical UV mapping
+                    float u = atan2(localNormal.x, localNormal.z) / (2.0 * 3.14159265) + 0.5;
+                    float v = asin(clamp(localNormal.y, -1.0, 1.0)) / 3.14159265 + 0.5;
+                    float3 moonAlbedo = SAMPLE_TEXTURE2D_LOD(_MoonTexture, sampler_LinearRepeat, float2(u, v), 0).rgb;
+
+                    // Lunar phase terminator lighting + earthshine
+                    float lambert = smoothstep(-0.05, 0.15, dot(localNormal, _MoonLightLocal.xyz));
+                    float earthshine = _MoonParams.z * 0.15;
+                    float shading = lambert + earthshine;
+
+                    moonColor = moonAlbedo * shading * _MoonColor.rgb * _MoonParams.y * discEdge;
+                    moonMask = discEdge;
+                }
+
+                // Moonlight coronal halo
+                float haloIntensity = _MoonParams.w;
+                float moonHalo = pow(eyeCos, 80.0) * haloIntensity * 0.25 + pow(eyeCos, 350.0) * haloIntensity * 0.4;
+                float3 haloColor = moonHalo * _MoonColor.rgb * (1.0 - moonMask * 0.85);
+
+                return float4(moonColor + haloColor, moonMask);
             }
 
             float PhaseM(float costh, float g)
@@ -188,10 +283,6 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 else
                     lightDir = lightDir * rsqrt(lenSq);
 
-                float3 sunCol = _SunColor.rgb;
-                if (dot(sunCol, sunCol) < 0.001)
-                    sunCol = float3(1.0, 1.0, 1.0);
-
                 float density = max(_AtmosphereThickness, 0.1) * max(_AerosolHaze, 0.1);
                 float sunSize = clamp(_SunSize, 0.005, 0.2);
                 float convergence = clamp(_SunConvergence, 1.0, 30.0);
@@ -210,12 +301,13 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float densityR = sqhbias * density;
                 float densityM = sqhbias * sqhbias * hbias * max(_AerosolHaze, 0.1);
 
-                // Sunset transmission: when lightDir.y is low, lightColor turns deep golden/red/magenta!
+                // Sunset transmission: modulated directly by _SunColor (carrying Light color * intensity)
                 float adjLightY = lightDir.y;
                 float ly = adjLightY;
                 ly += saturate(-adjLightY + 0.02) * saturate(adjLightY + 0.7);
                 ly = clamp(ly, -1.0, 1.0);
-                float3 lightColor = GetAtmosphereSunTransmittance(float3(lightDir.x, ly, lightDir.z), density, hbias, M_OZONE2 * ozone) * sunCol;
+                float3 sunTransmittance = GetAtmosphereSunTransmittance(float3(lightDir.x, ly, lightDir.z), density, hbias, M_OZONE2 * ozone);
+                float3 lightColor = sunTransmittance * _SunColor.rgb;
 
                 // Atmospheric Rayleigh & Mie scattering
                 float3 R, M;
@@ -229,7 +321,23 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float3 rayleigh = (phaseR + phaseR * M_FAKE_MS) * lightColor + NIGHT_LIGHT * phaseR;
                 float3 mie = ((phaseM + phaseR * M_FAKE_MS) * lightColor + NIGHT_LIGHT * phaseR) * M_MIE;
                 float3 scattering = mie * M + rayleigh * R;
-                scattering += _NightSkyColor.rgb * smoothstep(0.1, -0.33, adjLightY);
+
+                // Night sky transition: fades in as sun descends below horizon
+                float nightWeight = smoothstep(0.04, -0.20, adjLightY);
+
+                if (_HasNightSkyMap > 0.5)
+                {
+                    float3 rotatedNightDir = RotateAroundY(o_rayDir, _NightRotation);
+                    float4 rawNightTex = SAMPLE_TEXTURECUBE_LOD(_NightSkyMap, sampler_LinearClamp, rotatedNightDir, 0);
+                    float3 nightSkyHDR = DecodeHDREnvironment(rawNightTex, _NightSkyMap_HDR) * _NightExposure;
+
+                    // Blend daytime atmospheric scattering smoothly into the starry HDRI backdrop
+                    scattering = lerp(scattering, nightSkyHDR, nightWeight);
+                }
+                else
+                {
+                    scattering += _NightSkyColor.rgb * smoothstep(0.1, -0.33, adjLightY);
+                }
 
                 // Planet / ground atmospheric absorption
                 if (t1.y > 0.0)
@@ -241,6 +349,10 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
                 // Modulate by SkyTint
                 scattering *= _SkyTint.rgb * 2.0;
+
+                // --- Moon rendering and background composition ---
+                float4 moonData = CalcMoon(o_rayDir);
+                scattering = scattering * (1.0 - moonData.a) + moonData.rgb;
 
                 // --- Direct Cloud Sampling & Sun Occlusion ---
                 float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
@@ -256,8 +368,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
                 // --- Crisp Sun Shape & Tight Coronal Halo ---
                 float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
-                float lightColorIntensity = max(length(sunCol), 0.25);
-                float3 sunRadiance = 6.0 * saturate(lightColor) * sunCol / lightColorIntensity;
+                float3 sunRadiance = 6.0 * saturate(sunTransmittance) * _SunColor.rgb;
                 float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
                 float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade * sunExtinction;
 

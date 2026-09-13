@@ -18,10 +18,10 @@ namespace EAStudio.Core.RenderFeature.Sky
 
     public abstract class SkySettings : VolumeComponent
     {
-        [Tooltip("Linear exposure multiplier for the skybox (1.0 = normal, 2.0 = 2x brighter).")]
+        [Tooltip("天空盒线性曝光强度倍率（1.0 为正常，2.0 为两倍亮度）。")]
         public MinFloatParameter exposure = new MinFloatParameter(1f, 0f);
 
-        [Tooltip("Update mode for ambient and reflection synchronization.")]
+        [Tooltip("环境漫反射与反射同步更新模式。")]
         public EnvUpdateModeParameter updateMode = new EnvUpdateModeParameter(EnvUpdateMode.Realtime);
 
         public virtual int GetParameterHashCode()

@@ -46,25 +46,25 @@ namespace EAStudio.Core.RenderFeature.Sky
     [Serializable, VolumeComponentMenu("Sky/Visual Environment")]
     public class VisualEnvironment : VolumeComponent
     {
-        [Tooltip("Type of sky to display and evaluate.")]
+        [Tooltip("天空渲染类型：None(无)、HDRI(全景贴图)、Procedural(物理大气程序化天空)。")]
         public SkyTypeParameter skyType = new SkyTypeParameter(SkyType.HDRI);
 
-        [Tooltip("Evaluation mode for ambient probe (SH).")]
+        [Tooltip("环境光探针 (SH 球谐) 评估模式：Realtime(实时每帧同步)、OnChanged(参数变化时更新)、Off(关闭)。")]
         public SkyAmbientModeParameter skyAmbientMode = new SkyAmbientModeParameter(SkyAmbientMode.Realtime);
 
-        [Header("Environment Lighting")]
-        [Tooltip("Linear intensity multiplier for Environment Lighting (Diffuse SH / Ambient). Matches Lighting -> Environment Lighting -> Intensity Multiplier.")]
+        [Header("环境光照 (Environment Lighting)")]
+        [Tooltip("环境光照（漫反射球谐 / Ambient SH）线性强度倍率，对标 Lighting 窗口中的 Environment Lighting -> Intensity Multiplier。")]
         public MinFloatParameter lightingMultiplier = new MinFloatParameter(1f, 0f);
 
-        [Header("Clouds")]
-        [Tooltip("Cloud rendering technique.")]
+        [Header("云层系统 (Clouds)")]
+        [Tooltip("云层渲染技术：None(关闭)、Layered(多层分层云)。")]
         public CloudTypeParameter cloudType = new CloudTypeParameter(CloudType.None);
 
-        [Header("Wind")]
-        [Tooltip("Global wind orientation in degrees.")]
+        [Header("风场设置 (Wind)")]
+        [Tooltip("全局风向角度（0-360度，0为正东）。")]
         public ClampedFloatParameter windOrientation = new ClampedFloatParameter(0f, 0f, 360f);
 
-        [Tooltip("Global wind speed in m/s.")]
+        [Tooltip("全局风速（米/秒），驱动云层与投影移动速度。")]
         public MinFloatParameter windSpeed = new MinFloatParameter(5f, 0f);
     }
 }

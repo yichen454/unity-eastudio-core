@@ -31,6 +31,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
 
             ProceduralSky proceduralSky = null;
+            MoonSettings moonSettings = stack.GetComponent<MoonSettings>();
 
             // 1. Skybox background evaluation and update
             if (visualEnv.skyType.value == SkyType.HDRI)
@@ -47,7 +48,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             else if (visualEnv.skyType.value == SkyType.Procedural)
             {
                 proceduralSky = stack.GetComponent<ProceduralSky>();
-                SkyEnvironmentSync.UpdateProceduralEnvironment(camera, visualEnv, proceduralSky);
+                SkyEnvironmentSync.UpdateProceduralEnvironment(camera, visualEnv, proceduralSky, moonSettings);
             }
 
             // 2. Cloud layer: Only generate low-res cloud map before opaques
@@ -65,7 +66,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 if (hasActiveClouds)
                 {
                     bool enableShadows = cloudSettings.castShadows.value;
-                    m_CloudRenderPass.Setup(visualEnv, cloudSettings, proceduralSky, sunLight, enableShadows);
+                    m_CloudRenderPass.Setup(visualEnv, cloudSettings, proceduralSky, moonSettings, sunLight, enableShadows);
 
                     // Low-Res generation Before Opaques -> binds _CloudTexture globally for shadows & skybox
                     renderer.EnqueuePass(m_CloudRenderPass.LowRes);

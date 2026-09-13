@@ -55,6 +55,9 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 float4 _SunColor;
                 float4 _GroundColor;
                 float4 _NightSkyColor;
+                float4 _MoonDirection;
+                float4 _MoonColor;
+                float _MoonLightIntensity;
                 float _GroundFade;
                 float _CloudWindTime;
             CBUFFER_END
@@ -112,6 +115,9 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 float3 ambientSky,
                 float eyeCos,
                 float phase,
+                float eyeCos_moon,
+                float moonPhase,
+                float sunDirectIntensity,
                 float timeVal,
                 float2 parallaxMainLightDir,
                 inout float3 color,
@@ -142,6 +148,7 @@ Shader "Hidden/EAStudio/CloudGenerator"
                     float detail = SAMPLE_TEXTURE2D_LOD(detailTex, sampler_LinearRepeat, samplePosDetail, 0).r;
                     float erodeWeight = pow(saturate(1.0 - density), 4.0) * detailParams.y;
                     density = max(0.0, density - (1.0 - detail) * erodeWeight);
+                    density = smoothstep(0.0, 0.04, density) * density;
                 }
 
                 if (density <= 0.0001)
@@ -186,10 +193,10 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 float forwardGlow = pow(eyeCos, 6.0) * 0.35;
                 absorption = max(absorption, forwardGlow + absorptionLimit * 0.8);
 
-                // Controlled Henyey-Greenstein silver lining (capped to prevent blowing out)
-                float hgNorm = min(phase, 2.5);
-                float edgeMask = smootherstep(silverLiningParams.x, 0.0, density);
-                float silverLining = hgNorm * edgeMask * min(silverLiningParams.y, 1.5);
+                // Physical continuous forward scattering (replaces harsh step-cliff with exponential penetration)
+                float hgNorm = min(phase, 2.0);
+                float forwardScatter = exp(-density * 3.5);
+                float silverLining = hgNorm * forwardScatter * min(silverLiningParams.y, 1.2) * 0.4;
 
                 // --- Atmospheric Day / Sunset / Night Lighting ---
                 // 1. Direct Sunlit component: fades out at night, glows golden-red at sunset
@@ -198,8 +205,15 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 // 2. Ambient Sky/Ground component: soft blue in day, rose-purple at dusk, dark at night
                 float3 ambientColor = ambientSky * (0.55 + 0.45 * (1.0 - absorption));
 
-                // 3. Combined cloud color modulated by layer tint
-                float3 cloudColor = (sunlitColor + ambientColor) * layerColor;
+                // 3. Moonlight illumination on clouds at night (soft exponential penetration, zero hard cliff)
+                float moonHG = min(moonPhase, 2.0);
+                float moonScatter = exp(-density * 3.5);
+                float moonSilver = moonHG * moonScatter * min(silverLiningParams.y, 1.2) * 0.4;
+                float3 moonLight = _MoonColor.rgb * _MoonLightIntensity * (moonSilver + absorption * 0.3);
+                float3 nocturnalLight = moonLight * (1.0 - sunDirectIntensity);
+
+                // 4. Combined cloud color modulated by layer tint
+                float3 cloudColor = (sunlitColor + ambientColor + nocturnalLight) * layerColor;
 
                 totalTransmittance *= transmittance;
                 color = lerp(cloudColor, color, transmittance);
@@ -226,6 +240,14 @@ Shader "Hidden/EAStudio/CloudGenerator"
 
                 float eyeCos = max(0.0, dot(rayDir, L));
                 float phase = hg(eyeCos, 0.9) * 0.7;
+
+                // Moonlight forward scattering
+                float3 M = _MoonDirection.xyz;
+                float lenM = dot(M, M);
+                if (lenM < 0.001) M = float3(0.0, 0.7071, -0.7071);
+                else M = M * rsqrt(lenM);
+                float eyeCos_moon = max(0.0, dot(rayDir, M));
+                float moonPhase = hg(eyeCos_moon, 0.85);
 
                 // --- Sun Elevation Driven Lighting (Day -> Sunset -> Night) ---
                 // 1. Direct sunlight intensity: 1.0 in day (L.y > 0.05), fades smoothly to 0.0 at night (L.y < -0.15)
@@ -267,7 +289,7 @@ Shader "Hidden/EAStudio/CloudGenerator"
                     _Cloud_0_WindVector,
                     _Cloud_0_LightmarchSteps.xy,
                     _Cloud_0_Color.rgb,
-                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, timeVal,
+                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, eyeCos_moon, moonPhase, sunDirectIntensity, timeVal,
                     _ParallaxTransitionedMainLightDir.xy,
                     cloudColor, totalTransmittance);
 
@@ -283,7 +305,7 @@ Shader "Hidden/EAStudio/CloudGenerator"
                     _Cloud_1_WindVector,
                     _Cloud_1_LightmarchSteps.xy,
                     _Cloud_1_Color.rgb,
-                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, timeVal,
+                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, eyeCos_moon, moonPhase, sunDirectIntensity, timeVal,
                     _ParallaxTransitionedMainLightDir.xy,
                     cloudColor, totalTransmittance);
 

@@ -78,6 +78,9 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_GroundColorID = Shader.PropertyToID("_GroundColor");
         private static readonly int s_GroundFadeID = Shader.PropertyToID("_GroundFade");
         private static readonly int s_NightSkyColorID = Shader.PropertyToID("_NightSkyColor");
+        private static readonly int s_MoonDirID = Shader.PropertyToID("_MoonDirection");
+        private static readonly int s_MoonColorID = Shader.PropertyToID("_MoonColor");
+        private static readonly int s_MoonLightIntensityID = Shader.PropertyToID("_MoonLightIntensity");
         private static readonly int s_WindTimeID = Shader.PropertyToID("_CloudWindTime");
 
         private readonly LowResPass m_LowResPass;
@@ -188,7 +191,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
         }
 
-        public void Setup(VisualEnvironment visualEnv, CloudSettings cloudSettings, ProceduralSky proceduralSky, Light sunLight, bool castShadows = true)
+        public void Setup(VisualEnvironment visualEnv, CloudSettings cloudSettings, ProceduralSky proceduralSky, MoonSettings moonSettings, Light sunLight, bool castShadows = true)
         {
             if (!EnsureMaterial() || visualEnv == null || cloudSettings == null)
                 return;
@@ -310,9 +313,38 @@ namespace EAStudio.Core.RenderFeature.Sky
             Color groundColor = proceduralSky != null ? proceduralSky.groundColor.value : new Color(0.369f, 0.349f, 0.341f, 1f);
             float groundFade = proceduralSky != null ? proceduralSky.groundFade.value : 0.25f;
             Color nightSkyColor = proceduralSky != null ? proceduralSky.nightSkyColor.value : new Color(0.02f, 0.03f, 0.06f, 1f);
+
+            // Moon properties for night cloud lighting
+            Light moonLight = SkyEnvironmentSync.FindMoonLight();
+            if (moonLight == sunLight)
+                moonLight = null;
+
+            Vector3 moonDir;
+            if (moonLight != null)
+            {
+                moonDir = -moonLight.transform.forward;
+                if (Vector3.Dot(sunDir, moonDir) > 0.95f)
+                {
+                    moonDir = Vector3.Normalize(new Vector3(-sunDir.x, -sunDir.y * 0.95f + 0.12f, -sunDir.z));
+                }
+            }
+            else
+            {
+                moonDir = Vector3.Normalize(new Vector3(-sunDir.x, -sunDir.y * 0.95f + 0.12f, -sunDir.z));
+            }
+
+            Color baseMoonColor = moonSettings != null ? moonSettings.moonColor.value : new Color(0.92f, 0.95f, 1.0f, 1.0f);
+            Color moonLightColor = moonLight != null ? (moonLight.color * moonLight.intensity) : Color.white;
+            Color moonColor = baseMoonColor * moonLightColor;
+            float moonIntensity = (moonSettings == null || moonSettings.enableMoon.value) ?
+                (moonSettings != null ? moonSettings.cloudMoonlightIntensity.value : 0.7f) : 0.0f;
+
             m_GeneratorMaterial.SetColor(s_GroundColorID, groundColor);
             m_GeneratorMaterial.SetFloat(s_GroundFadeID, groundFade);
             m_GeneratorMaterial.SetColor(s_NightSkyColorID, nightSkyColor);
+            m_GeneratorMaterial.SetVector(s_MoonDirID, new Vector4(moonDir.x, moonDir.y, moonDir.z, 0f));
+            m_GeneratorMaterial.SetColor(s_MoonColorID, moonColor);
+            m_GeneratorMaterial.SetFloat(s_MoonLightIntensityID, moonIntensity);
             m_GeneratorMaterial.SetFloat(s_WindTimeID, currentTime);
 
             // 5. Global Properties for Ground Shadows & God Rays
