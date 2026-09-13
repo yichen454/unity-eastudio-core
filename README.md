@@ -8,6 +8,15 @@ EAStudio 核心基础库与通用工具包，提供 URP 自定义渲染特性、
 
 ### 1. 运行时模块 (`Runtime`)
 - **Render Features (自定义渲染特性)**：
+  - **Sky & Cloud System (天空与程序化云系统)** (`SkyRenderFeature`)：
+    - **HDRP 式解耦架构**：仿照 HDRP 的 Volume 驱动模式，通过 `VisualEnvironment` 统筹控制 `HDRISky`、`ProceduralSky`、`MoonSettings` 与 `CloudSettings`。
+    - **全景 HDRI 天空 (`HDRISky`)**：支持高动态范围 HDR 浮点解码、精准标准灰阶色彩叠加（#808080）、多 Volume 间权重交叉过渡（Cross-fade Blending）及 XR Multiview / 双目模式完整兼容。
+    - **物理程序化大气天空 (`ProceduralSky`)**：基于分析式物理大气散射算法（完整复刻瑞利散射、米氏气溶胶前向散射、臭氧层吸收），呈现真实的晨昏红移与落日晚霞；双高斯软核日冕模型彻底消除硬切边缘；支持落日后平滑过渡至星空 HDRI 全景贴图或物理深空底色。
+    - **3D 天文月相与夜空系统 (`MoonSettings`)**：支持 3D 物理广告牌月相阴影投射（根据日月空间夹角实时计算朔、望、弦月相），集成 NASA 高清月面材质贴图采样、微弱地照光（Earthshine）及柔和月冕光晕（Halo）。
+    - **多层体积感程序化云 (`CloudSettings`)**：内置 6 张离线生成的 7-octave 周期平铺噪声图（Worley、Billow、Perlin、层积云及高频侵蚀图），支持双层独立海拔与云层形态；使用 Beer-Lambert 吸收定律与多步光线步进（Lightmarching）实现丰富的内部立体阴影与 Henyey-Greenstein 逆光银边；在不透明物体渲染前以低分辨率生成并在天空盒中直接合成，支持导出全局参数供地形阴影与体积光采样。
+    - **平行光 Cookie 动态云层阴影 (`CloudShadowCookie.shader`)**：将实时生成的顶视光流贴图绑定至 `Directional Light.cookie`，无需侵入场景材质即可在地面与物体上投射自然流动的云影。
+    - **24 小时昼夜双灯控制器 (`TimeOfDay.cs`)**：支持地理纬度、正北罗盘偏角与四季赤纬角轨道推算，自动协同控制 Sun Light 与 Moon Light 的朝向、强度渐变与阴影管线调度，内置天体防重合空间排斥机制。
+    - **全中文参数提示**：所有 Volume 参数及控制器提供完善且符合技术美术习惯的中文分栏（`[Header]`）与悬浮提示（`[Tooltip]`）。
   - **Depth PrePass** (`RenderingLayerDepthPrepassFeature` / `CustomDepthContextData`)：支持 Rendering Layer Mask 过滤的自定义深度预通过。
   - **UI / Overlay** (`UIOverlayRenderFeature`)：基于 URP RenderGraph 的场景与 UI 叠加渲染特性。
 - **Scene Warmup (场景预热与流程控制)**：
@@ -78,7 +87,10 @@ Packages/com.eastudio.core/
 │   └── Texture/                    # 贴图编辑器与 Compute Shaders
 └── Runtime/                        # 运行时核心模块 (EAStudio.Core.Runtime)
     ├── Common/                     # 通用系统/平台/渲染辅助
-    ├── RenderFeature/              # URP 渲染特性 (DepthPrePass / Overlay)
+    ├── RenderFeature/              # URP 渲染特性 (DepthPrePass / Overlay / Sky)
+    │   ├── DepthPrePass/           # 深度预处理特性
+    │   ├── Overlay/                # UI 叠加渲染特性
+    │   └── Sky/                    # 天空盒与云层系统 (Environment, Pass, Shaders, Volume)
     ├── SceneWarmup/                # 场景预热与激活流程
     └── Timeline/                   # Timeline 扩展 (Trigger 等)
 ```
