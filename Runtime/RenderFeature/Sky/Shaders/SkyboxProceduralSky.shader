@@ -93,33 +93,44 @@ Shader "Skybox/EAStudio/ProceduralSky"
             }
 
             // Atmosphere Constants (Felix Westin analytical model)
-            #define C_RAYLEIGH float3(5.8, 13.5, 33.1) * 1e-6
-            #define C_MIE      float3(3.996, 3.996, 3.996) * 1e-6
-            #define C_OZONE    float3(0.65, 1.88, 0.085) * 1e-6
+            #define C_RAYLEIGH (float3(5.802, 13.558, 33.100) * 1e-6)
+            #define C_MIE      (float3(3.996, 3.996, 3.996) * 1e-6)
+            #define C_OZONE    (float3(0.650, 1.881, 0.085) * 1e-6)
 
             #define RAYLEIGH_MAX_LUM 2.5
+            #define MIE_MAX_LUM      0.3
             #define M_FAKE_MS        0.3
             #define M_AERIAL         2.5
             #define NIGHT_LIGHT      0.15
+            #define M_MIE            float3(0.95, 0.85, 0.75)
+            #define M_OZONE2         5.0
+            #define M_DENSITY_HEIGHT_MOD 1e-12
 
             static const float kPlanetRadius = 6371000.0;
             static const float kAtmosphereHeight = 100000.0;
 
-            // HDRP Original Mie Constants for Sun Attenuation
-            #define MIE_G (-0.990)
-            #define MIE_G2 0.9801
-
-            float GetMiePhaseHDRP(float eyeCos, float eyeCos2, float sunSize)
+            float CalcSunAttenuation(float3 lightPos, float3 ray, float sunSize, float sunConvergence)
             {
-                float temp = 1.0 + MIE_G2 - 2.0 * MIE_G * eyeCos;
-                temp = pow(max(temp, 1.0e-4), pow(max(sunSize, 0.001), 0.65) * 10.0);
-                return 1.5 * ((1.0 - MIE_G2) / (2.0 + MIE_G2)) * (1.0 + eyeCos2) / max(temp, 1.0e-4);
-            }
+                float eyeCos = dot(lightPos, ray);
+                if (eyeCos <= 0.0)
+                    return 0.0;
 
-            float CalcSunAttenuationHDRP(float3 lightPos, float3 ray, float sunSize, float sunConvergence)
-            {
-                float focusedEyeCos = pow(saturate(dot(lightPos, ray)), sunConvergence);
-                return GetMiePhaseHDRP(-focusedEyeCos, focusedEyeCos * focusedEyeCos, sunSize);
+                // Angular distance squared: 2 * (1 - cos(theta)) ≈ theta^2
+                float dist2 = max(0.0, 2.0 * (1.0 - eyeCos));
+
+                // Core sun size (in radians)
+                float sunRadius = clamp(sunSize, 0.005, 0.2) * 0.35;
+                float sunR2 = sunRadius * sunRadius;
+
+                // 1. Soft Core: smooth Gaussian profile without hard edges
+                float core = exp(-dist2 / max(sunR2 * 0.85, 1e-6));
+
+                // 2. Smooth Coronal Glow: natural bloom closely enveloping the sun
+                float convergence = clamp(sunConvergence, 1.0, 30.0);
+                float haloSpread = sunRadius * (10.0 / convergence);
+                float halo = exp(-sqrt(dist2) / max(haloSpread, 1e-4)) * 0.3;
+
+                return core + halo;
             }
 
             float2 SphereIntersection(float3 rayDir, float3 sphereCenter, float sphereRadius)
@@ -137,9 +148,19 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 return (1.0 + costh * costh) * 0.06;
             }
 
-            void GetRayleigh(float opticalDepth, float densityR, out float3 R)
+            float PhaseM(float costh, float g)
+            {
+                g = min(g, 0.9381);
+                float k = 1.55 * g - 0.55 * g * g * g;
+                float a = 1.0 - k * k;
+                float b = 12.57 * pow(1.0 - k * costh, 2.0);
+                return a / max(b, 1e-4);
+            }
+
+            void GetRayleighMie(float opticalDepth, float densityR, float densityM, out float3 R, out float3 M)
             {
                 R = (1.0 - exp(-opticalDepth * densityR * C_RAYLEIGH / RAYLEIGH_MAX_LUM)) * RAYLEIGH_MAX_LUM;
+                M = (1.0 - exp(-opticalDepth * densityM * C_MIE / MIE_MAX_LUM)) * MIE_MAX_LUM;
             }
 
             // Direct solar transmittance through atmosphere (computes sunset reddening with ozone control)
@@ -149,7 +170,6 @@ Shader "Skybox/EAStudio/ProceduralSky"
                     exp(-(saturate(lightDir.y + 0.5) * 5.0)) * 0.4 +
                     pow(saturate(1.0 - lightDir.y), 2.0) * 0.02 +
                     0.002;
-
                 return exp(-(C_RAYLEIGH + C_MIE + C_OZONE * ozoneMultiplier) * lightExtinctionAmount * density * multiplier * 1e6);
             }
 
@@ -177,66 +197,84 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float convergence = clamp(_SunConvergence, 1.0, 30.0);
                 float ozone = max(_OzoneAbsorption, 0.0);
 
-                // Planet spheres
+                // Planet and atmosphere intersection (Fast Sky 2 exact method)
                 float3 planetCenter = float3(0.0, -kPlanetRadius, 0.0);
-                float2 tAtmosphere = SphereIntersection(rayDir, planetCenter, kPlanetRadius + kAtmosphereHeight);
+                float2 t1 = SphereIntersection(rayDir, planetCenter, kPlanetRadius);
+                float2 t2 = SphereIntersection(rayDir, planetCenter, kPlanetRadius + kAtmosphereHeight);
 
-                float opticalDepth = min(tAtmosphere.y, 1e7 * M_AERIAL);
+                float opticalDepth = min(t2.y, 1e7 * M_AERIAL);
 
                 // Height density
-                float hbias = 1.0 - 1.0 / (2.0 + pow(min(1e7, tAtmosphere.y), 2.0) * 1e-12);
+                float hbias = 1.0 - 1.0 / (2.0 + pow(t2.y, 2.0) * M_DENSITY_HEIGHT_MOD);
                 float sqhbias = hbias * hbias;
                 float densityR = sqhbias * density;
+                float densityM = sqhbias * sqhbias * hbias * max(_AerosolHaze, 0.1);
 
                 // Sunset transmission: when lightDir.y is low, lightColor turns deep golden/red/magenta!
                 float adjLightY = lightDir.y;
-                float ly = adjLightY + saturate(-adjLightY + 0.02) * saturate(adjLightY + 0.7);
+                float ly = adjLightY;
+                ly += saturate(-adjLightY + 0.02) * saturate(adjLightY + 0.7);
                 ly = clamp(ly, -1.0, 1.0);
-                float3 lightColor = GetAtmosphereSunTransmittance(float3(lightDir.x, ly, lightDir.z), density, hbias, 5.0 * ozone) * sunCol;
+                float3 lightColor = GetAtmosphereSunTransmittance(float3(lightDir.x, ly, lightDir.z), density, hbias, M_OZONE2 * ozone) * sunCol;
 
-                // Atmospheric Rayleigh scattering
-                float3 R;
-                GetRayleigh(opticalDepth, densityR, R);
+                // Atmospheric Rayleigh & Mie scattering
+                float3 R, M;
+                GetRayleighMie(opticalDepth, densityR, densityM, R, M);
 
                 float costh = dot(o_rayDir, lightDir);
                 float phaseR = PhaseRayleigh(costh);
+                float phaseM = PhaseM(costh, 0.88) * smoothstep(-0.35, -0.2, o_rayDir.y);
 
-                // Apply sunset light color to Rayleigh scattering (glorious sunset glow / 晚霞!)
+                // Apply forward illuminated sunlight to atmosphere
                 float3 rayleigh = (phaseR + phaseR * M_FAKE_MS) * lightColor + NIGHT_LIGHT * phaseR;
-                float3 scattering = rayleigh * R;
+                float3 mie = ((phaseM + phaseR * M_FAKE_MS) * lightColor + NIGHT_LIGHT * phaseR) * M_MIE;
+                float3 scattering = mie * M + rayleigh * R;
+                scattering += _NightSkyColor.rgb * smoothstep(0.1, -0.33, adjLightY);
+
+                // Planet / ground atmospheric absorption
+                if (t1.y > 0.0)
+                {
+                    float planetOpticalDepth = t1.y - max(0.0, t1.x);
+                    float skyWeight = exp(-planetOpticalDepth * 1e-6);
+                    scattering *= lerp(_GroundColor.rgb, 1.0, skyWeight);
+                }
 
                 // Modulate by SkyTint
                 scattering *= _SkyTint.rgb * 2.0;
 
-                // Night sky background modulated by user-configurable NightSkyColor
-                float3 nightSkyColor = _NightSkyColor.rgb;
-                scattering += nightSkyColor * smoothstep(0.1, -0.33, adjLightY);
+                // --- Direct Cloud Sampling & Sun Occlusion ---
+                float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
+                half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
-                // Ground & Horizon transition with groundFade
+                // Cloud transmittance: thick clouds soften and diffuse the sun disc (never turning into a dark hole)
+                float cloudTransmittance = saturate(1.0 - cloud.a);
+                float sunExtinction = max(cloudTransmittance * cloudTransmittance, 0.15 * cloudTransmittance + 0.08 * (1.0 - cloud.a * 0.8));
+
+                // Ground & Horizon transition width
                 float fadeWidth = clamp(_GroundFade, 0.02, 1.0);
                 float groundBlend = smoothstep(0.0, fadeWidth, saturate(-o_rayDir.y));
+
+                // --- Crisp Sun Shape & Tight Coronal Halo ---
+                float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
+                float lightColorIntensity = max(length(sunCol), 0.25);
+                float3 sunRadiance = 6.0 * saturate(lightColor) * sunCol / lightColorIntensity;
+                float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
+                float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade * sunExtinction;
+
+                // Composite: Sky background is occluded by cloud, then sun is added, plus cloud color
+                if (cloud.a > 0.0001)
+                {
+                    scattering = scattering * cloudTransmittance + cloud.rgb;
+                }
+                scattering += sunFinal;
+
+                // Synchronize ground transition: ground smoothly covers sky, clouds, and sun below horizon!
                 float3 groundBase = _GroundColor.rgb * (saturate(lightDir.y * 2.0 + 0.2) * 0.6 + 0.1);
                 scattering = lerp(scattering, groundBase, groundBlend);
-
-                // --- Exact HDRP Sun Shape & Attenuation ---
-                float sunAttenuation = CalcSunAttenuationHDRP(lightDir, o_rayDir, sunSize, convergence);
-                float lightColorIntensity = max(length(sunCol), 0.25);
-                float3 sunRadiance = 15.0 * saturate(lightColor) * sunCol / lightColorIntensity;
-                float3 sunFinal = sunRadiance * sunAttenuation;
-
-                float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
-                scattering += sunFinal * sunHorizonFade;
 
                 // Linear exposure
                 float exposure = _Exposure <= 0.001 ? 1.0 : _Exposure;
                 scattering *= exposure;
-
-                // --- Direct Cloud Integration ---
-                float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
-                half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
-
-                // Composite cloud over sky (cloud is premultiplied RGB and alpha opacity)
-                scattering = scattering * (1.0 - cloud.a) + cloud.rgb;
 
                 return half4(scattering, 1.0);
             }

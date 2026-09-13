@@ -2,41 +2,12 @@ Shader "Hidden/EAStudio/CloudGenerator"
 {
     Properties
     {
-        _Layer1Shape ("Layer 1 Shape Type", Int) = 0
-        _CloudCoverage ("Coverage", Range(0, 1)) = 0.5
-        _CloudDensity ("Density", Range(0.1, 3.0)) = 1.0
-        _CloudScale ("Scale", Float) = 1.0
-
-        _EnableLayer2 ("Enable Layer 2", Float) = 1.0
-        _Layer2Shape ("Layer 2 Shape Type", Int) = 1
-        _Layer2Coverage ("Layer 2 Coverage", Range(0, 1)) = 0.4
-        _Layer2Density ("Layer 2 Density", Range(0.05, 2.0)) = 0.5
-        _Layer2Scale ("Layer 2 Scale", Float) = 2.5
-        _Layer2SpeedMul ("Layer 2 Speed Multiplier", Float) = 1.5
-
-        _DetailErosion ("Detail Erosion", Range(0, 1)) = 0.55
-        _CloudHorizonFade ("Horizon Fade", Range(0.02, 0.5)) = 0.16
-        _SilverLiningStrength ("Silver Lining", Float) = 2.5
-        _AtmosphereThickness ("Atmosphere Thickness", Float) = 1.0
-        _CloudColor ("Cloud Color", Color) = (1, 1, 1, 1)
-        _CloudShadowColor ("Shadow Color", Color) = (0.35, 0.38, 0.45, 1)
-
-        _CloudWindDirection ("Wind Direction", Vector) = (1, 0, 0, 0)
-        _CloudWindSpeed ("Wind Speed", Float) = 5.0
         _CloudWindTime ("Wind Time", Float) = 0.0
-
-        _SunDirection ("Sun Direction", Vector) = (0, 0.707, 0.707, 0)
-        _SunColor ("Sun Color", Color) = (1, 1, 1, 1)
     }
 
     SubShader
     {
-        Tags
-        {
-            "RenderType" = "Opaque"
-            "RenderPipeline" = "UniversalPipeline"
-        }
-
+        Tags { "RenderType" = "Opaque" }
         Cull Off
         ZWrite Off
         ZTest Always
@@ -48,37 +19,44 @@ Shader "Hidden/EAStudio/CloudGenerator"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
-            #pragma target 2.0
+            #pragma target 3.0
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
+            TEXTURE2D(_Cloud_0_Tex);
+            TEXTURE2D(_Cloud_0_DetailTex);
+            TEXTURE2D(_Cloud_1_Tex);
+            TEXTURE2D(_Cloud_1_DetailTex);
+
             CBUFFER_START(UnityPerMaterial)
-                int _Layer1Shape;
-                float _CloudCoverage;
-                float _CloudDensity;
-                float _CloudScale;
+                float4 _Cloud_0_SampleParams;       // x: scale, y: curvature*0.5, z: 1 - coverage, w: rev_inv_coverage
+                float4 _Cloud_0_DetailParams;       // x: detailScale, y: detailWeight
+                float4 _Cloud_0_SilverLiningParams; // x: width, y: strength
+                float4 _Cloud_0_MaskParams;         // x: rcp(horizonMask), y: horizonMaskBlend, z: rcp(1-zenithMask), w: zenithMaskBlend
+                float4 _Cloud_0_LightingParams;     // x: opacity, y: absorption, z: absorptionLimit, w: thickness * 0.02
+                float4 _Cloud_0_WindVector;         // xy: windVector, w: detailWindSpeed
+                float4 _Cloud_0_LightmarchSteps;    // x: steps, y: rcp(steps)
+                float4 _Cloud_0_Color;
+                float4 _Cloud_0_LightTransmittance;
 
-                float _EnableLayer2;
-                int _Layer2Shape;
-                float _Layer2Coverage;
-                float _Layer2Density;
-                float _Layer2Scale;
-                float _Layer2SpeedMul;
+                float4 _Cloud_1_SampleParams;
+                float4 _Cloud_1_DetailParams;
+                float4 _Cloud_1_SilverLiningParams;
+                float4 _Cloud_1_MaskParams;
+                float4 _Cloud_1_LightingParams;
+                float4 _Cloud_1_WindVector;
+                float4 _Cloud_1_LightmarchSteps;
+                float4 _Cloud_1_Color;
+                float4 _Cloud_1_LightTransmittance;
 
-                float _DetailErosion;
-                float _CloudHorizonFade;
-                float _SilverLiningStrength;
-                float _AtmosphereThickness;
-                float4 _CloudColor;
-                float4 _CloudShadowColor;
-
-                float4 _CloudWindDirection;
-                float _CloudWindSpeed;
-                float _CloudWindTime;
-
+                float4 _ParallaxTransitionedMainLightDir;
                 float4 _SunDirection;
                 float4 _SunColor;
+                float4 _GroundColor;
+                float4 _NightSkyColor;
+                float _GroundFade;
+                float _CloudWindTime;
             CBUFFER_END
 
             struct Attributes
@@ -100,103 +78,131 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-                output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID, 1.0);
+                output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
                 output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
                 return output;
             }
 
-            // =========================================================================================
-            // Fast Analytical Procedural Noise Library (Worley, Perlin, Billow, Stratocumulus)
-            // =========================================================================================
-            float2 Hash22(float2 p)
+            float smootherstep(float a, float b, float x)
             {
-                p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
-                return frac(sin(p) * 43758.5453123);
+                x = saturate((x - a) / max(0.0001, b - a));
+                return x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
             }
 
-            // 1. Worley / Voronoi Cellular Noise (Puffy cumulus)
-            float Worley2D(float2 p)
+            float hg(float eyeCos, float g)
             {
-                float2 i_pos = floor(p);
-                float2 f_pos = frac(p);
-                float minDist = 1.0;
-                UNITY_UNROLL
-                for (int y = -1; y <= 1; y++)
+                float g2 = g * g;
+                return (1.0 - g2) / (4.0 * 3.14159265 * pow(max(1.0 + g2 - 2.0 * g * eyeCos, 0.001), 1.5));
+            }
+
+            void ProcessCloudLayer(
+                Texture2D tex,
+                Texture2D detailTex,
+                float4 sampleParams,
+                float2 detailParams,
+                float2 silverLiningParams,
+                float4 maskParams,
+                float4 lightingParams,
+                float4 windVector,
+                float2 lightmarchSteps,
+                float3 layerColor,
+                float3 rayDir,
+                float3 L,
+                float3 directSunLight,
+                float3 ambientSky,
+                float eyeCos,
+                float phase,
+                float timeVal,
+                float2 parallaxMainLightDir,
+                inout float3 color,
+                inout float totalTransmittance)
+            {
+                // If coverage is 0 or layer disabled, sampleParams.w == 0, strictly skip!
+                if (sampleParams.w < 0.001)
+                    return;
+
+                float curvature = sampleParams.y;
+                float2 parallaxViewDir = rayDir.xz * rcp(lerp(rayDir.y, 1.0, curvature));
+                float2 samplePos = parallaxViewDir * sampleParams.x * (curvature + 1.0);
+                float2 windOffset = windVector.xy * timeVal;
+                float2 samplePosBase = samplePos + windOffset;
+
+                // Base fractal density
+                float rawTex = SAMPLE_TEXTURE2D_LOD(tex, sampler_LinearRepeat, samplePosBase, 0).r;
+                float rawDiff = rawTex - sampleParams.z;
+                if (rawDiff <= 0.0)
+                    return;
+
+                float density = rawDiff * sampleParams.w;
+                float baseDensity = density;
+
+                if (density > 0.0)
                 {
-                    UNITY_UNROLL
-                    for (int x = -1; x <= 1; x++)
-                    {
-                        float2 neighbor = float2(x, y);
-                        float2 randPoint = Hash22(i_pos + neighbor);
-                        float2 diff = neighbor + randPoint - f_pos;
-                        minDist = min(minDist, length(diff));
-                    }
+                    float2 samplePosDetail = samplePos * detailParams.x + windOffset * windVector.w;
+                    float detail = SAMPLE_TEXTURE2D_LOD(detailTex, sampler_LinearRepeat, samplePosDetail, 0).r;
+                    float erodeWeight = pow(saturate(1.0 - density), 4.0) * detailParams.y;
+                    density = max(0.0, density - (1.0 - detail) * erodeWeight);
                 }
-                return saturate(1.0 - minDist);
-            }
 
-            // 2. Perlin Gradient Wave Noise (Smooth wispy cirrus)
-            float Perlin2D(float2 p)
-            {
-                float2 i = floor(p);
-                float2 f = frac(p);
-                float2 u = f * f * (3.0 - 2.0 * f);
-                return lerp(
-                    lerp(dot(Hash22(i + float2(0.0, 0.0)) * 2.0 - 1.0, f - float2(0.0, 0.0)),
-                         dot(Hash22(i + float2(1.0, 0.0)) * 2.0 - 1.0, f - float2(1.0, 0.0)), u.x),
-                    lerp(dot(Hash22(i + float2(0.0, 1.0)) * 2.0 - 1.0, f - float2(0.0, 1.0)),
-                         dot(Hash22(i + float2(1.0, 1.0)) * 2.0 - 1.0, f - float2(1.0, 1.0)), u.x), u.y) * 0.5 + 0.5;
-            }
+                if (density <= 0.0001)
+                    return;
 
-            // 3. Billow Turbulent Noise (Cauliflower puffs)
-            float Billow2D(float2 p)
-            {
-                return abs(Worley2D(p) * 2.0 - 1.0);
-            }
+                // Horizon mask only: smoothly fades near ground, keeps zenith (正上方) 100% full and continuous
+                float tH = smootherstep(maskParams.y, 1.0, (rayDir.y + 0.02) * maskParams.x);
+                float mul = tH;
 
-            // 4. Stratocumulus Layered Hybrid Noise (Deck clouds)
-            float Stratocumulus2D(float2 p)
-            {
-                float pVal = Perlin2D(p);
-                float wVal = Worley2D(p * 1.5);
-                return saturate(pVal * 0.6 + wVal * 0.5);
-            }
+                float transmittance = exp(-density * mul * lightingParams.x);
 
-            float SampleNoiseArchetype(float2 p, int archetype)
-            {
-                if (archetype == 0) return Worley2D(p);
-                if (archetype == 1) return Perlin2D(p);
-                if (archetype == 2) return Billow2D(p);
-                return Stratocumulus2D(p);
-            }
+                // Light marching step: marches through cloud slab along sunlight direction
+                // Prevents step vector from collapsing to 0 at the sun position (which caused the dark hole!)
+                float2 sunSlabDir = -normalize(L.xz + float2(0.0001, 0.0001));
+                float2 dirToLight = (parallaxMainLightDir - parallaxViewDir);
+                float dirLen = length(dirToLight);
+                float2 viewShift = dirLen > 0.001 ? (dirToLight / dirLen * min(dirLen, 2.0)) : float2(0, 0);
 
-            float FractalShape(float2 p, int archetype)
-            {
-                float v = 0.0;
-                float amp = 0.5;
-                float2 shift = float2(100.0, 100.0);
-                UNITY_UNROLL
-                for (int i = 0; i < 3; i++)
+                float2 stepDir = normalize(sunSlabDir + viewShift * 0.35);
+                float2 lightRayStep = lightingParams.w * lightmarchSteps.y * stepDir * 0.15;
+                float jitter = frac(sin(dot(samplePosBase * 50.0, float2(12.9898, 78.233))) * 43758.5453);
+                float2 lightRayPos = samplePosBase + lightRayStep * (jitter * 0.5 + 0.5);
+
+                float lightAtt = baseDensity * 0.5;
+
+                int steps = (int)lightmarchSteps.x;
+                UNITY_LOOP
+                for (int l = 0; l < steps; l++)
                 {
-                    v += amp * SampleNoiseArchetype(p, archetype);
-                    p = p * 2.04 + shift;
-                    amp *= 0.5;
+                    float stepVal = max(0.0, SAMPLE_TEXTURE2D_LOD(tex, sampler_LinearRepeat, lightRayPos, 0).r - sampleParams.z) * sampleParams.w;
+                    lightAtt += stepVal;
+                    lightRayPos += lightRayStep;
                 }
-                return v * 1.15;
-            }
 
-            // Sunlight atmospheric transmittance (sunset reddening)
-            float3 CalculateSunTransmittance(float3 L, float thickness)
-            {
-                float3 C_RAYLEIGH = float3(5.8, 13.5, 33.1) * 1e-6;
-                float3 C_MIE = float3(3.996, 3.996, 3.996) * 1e-6;
-                float3 C_OZONE = float3(0.65, 1.88, 0.085) * 1e-6;
+                // Smooth Beer-Lambert absorption without harsh cliff
+                float attFactor = lightAtt * lightmarchSteps.y * lightingParams.y;
+                float absorptionCurve = exp(-attFactor * 0.7);
+                float absorptionLimit = lightingParams.z;
+                float absorption = lerp(absorptionLimit, 1.0, absorptionCurve);
 
-                float lightExtinctionAmount = exp(-(saturate(L.y + 0.05) * 35.0)) +
-                                            exp(-(saturate(L.y + 0.5) * 4.5)) * 0.4 +
-                                            pow(saturate(1.0 - L.y), 2.0) * 0.02 + 0.002;
+                // Forward scattering glow inside cloud body looking toward the sun (prevents dark hole)
+                float forwardGlow = pow(eyeCos, 6.0) * 0.35;
+                absorption = max(absorption, forwardGlow + absorptionLimit * 0.8);
 
-                return exp(-(C_RAYLEIGH * 1.5 + C_MIE + C_OZONE * 4.0) * lightExtinctionAmount * thickness * 1e6);
+                // Controlled Henyey-Greenstein silver lining (capped to prevent blowing out)
+                float hgNorm = min(phase, 2.5);
+                float edgeMask = smootherstep(silverLiningParams.x, 0.0, density);
+                float silverLining = hgNorm * edgeMask * min(silverLiningParams.y, 1.5);
+
+                // --- Atmospheric Day / Sunset / Night Lighting ---
+                // 1. Direct Sunlit component: fades out at night, glows golden-red at sunset
+                float3 sunlitColor = directSunLight * (silverLining + absorption);
+
+                // 2. Ambient Sky/Ground component: soft blue in day, rose-purple at dusk, dark at night
+                float3 ambientColor = ambientSky * (0.55 + 0.45 * (1.0 - absorption));
+
+                // 3. Combined cloud color modulated by layer tint
+                float3 cloudColor = (sunlitColor + ambientColor) * layerColor;
+
+                totalTransmittance *= transmittance;
+                color = lerp(cloudColor, color, transmittance);
             }
 
             half4 Frag(Varyings input) : SV_Target
@@ -206,105 +212,83 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 float3 worldPos = ComputeWorldSpacePosition(input.uv, UNITY_RAW_FAR_CLIP_VALUE, UNITY_MATRIX_I_VP);
                 float3 rayDir = normalize(worldPos - _WorldSpaceCameraPos.xyz);
 
-                if (rayDir.y <= 0.0)
+                if (rayDir.y <= -0.01)
                     return half4(0.0, 0.0, 0.0, 0.0);
 
-                // Safe sun direction
+                // Early exit if both layers are disabled or have 0 coverage
+                if (_Cloud_0_SampleParams.w < 0.001 && _Cloud_1_SampleParams.w < 0.001)
+                    return half4(0.0, 0.0, 0.0, 0.0);
+
                 float3 L = _SunDirection.xyz;
                 float lenSq = dot(L, L);
-                if (lenSq < 0.001)
-                    L = float3(0.0, 0.7071, 0.7071);
-                else
-                    L = L * rsqrt(lenSq);
+                if (lenSq < 0.001) L = float3(0.0, 0.7071, 0.7071);
+                else L = L * rsqrt(lenSq);
 
-                float3 sunColor = _SunColor.rgb;
-                if (dot(sunColor, sunColor) < 0.001)
-                    sunColor = float3(1.0, 1.0, 1.0);
+                float eyeCos = max(0.0, dot(rayDir, L));
+                float phase = hg(eyeCos, 0.9) * 0.7;
 
-                float thickness = max(_AtmosphereThickness, 0.1);
+                // --- Sun Elevation Driven Lighting (Day -> Sunset -> Night) ---
+                // 1. Direct sunlight intensity: 1.0 in day (L.y > 0.05), fades smoothly to 0.0 at night (L.y < -0.15)
+                float sunDirectIntensity = smoothstep(-0.15, 0.05, L.y);
 
-                // Sunlight transmitted through atmosphere
-                float3 sunTransmittance = CalculateSunTransmittance(L, thickness);
-                float daylightFactor = saturate((L.y + 0.2) / 0.35);
-                float3 filteredSun = sunColor * sunTransmittance * daylightFactor;
-                float3 ambientSkyTint = float3(0.12, 0.18, 0.25) * daylightFactor + float3(0.01, 0.015, 0.02);
+                // 2. Sunset color transition: shifts smoothly as sun approaches and dips below horizon
+                float sunsetProgress = smoothstep(0.28, -0.02, L.y);
+                float3 sunsetColor = lerp(float3(1.0, 0.95, 0.90), float3(1.0, 0.45, 0.12), smoothstep(0.28, 0.05, L.y));
+                sunsetColor = lerp(sunsetColor, float3(0.95, 0.22, 0.06), smoothstep(0.05, -0.05, L.y));
+                float3 directSunLight = lerp(float3(1.0, 1.0, 1.0), sunsetColor, sunsetProgress) * sunDirectIntensity * _SunColor.rgb;
 
-                float cosTheta = dot(rayDir, L);
-                float hgPhase = (1.0 - 0.81) / pow(max(1.0 + 0.81 - 1.8 * cosTheta, 0.01), 1.5);
-                float horizonFade = smoothstep(0.0, max(_CloudHorizonFade, 0.02), rayDir.y);
+                // 3. Ambient lighting transition (Daytime blue -> Sunset purple/rose -> Night dark sky)
+                float daylightFactor = smoothstep(-0.18, 0.12, L.y);
+                float sunsetFactor = smoothstep(0.25, -0.02, L.y) * smoothstep(-0.15, 0.08, L.y);
 
-                // =========================================================================================
-                // Shader-level Time Animation: Uses _CloudWindTime or built-in _Time.y
-                // =========================================================================================
+                float3 dayAmbient = float3(0.28, 0.35, 0.45);
+                float3 sunsetAmbient = float3(0.35, 0.22, 0.28);
+                float3 nightAmbient = _NightSkyColor.rgb * 1.5 + float3(0.015, 0.02, 0.035);
+
+                // Ground bounce light adds earth tone near ground
+                float3 groundBounce = _GroundColor.rgb * (saturate(L.y * 1.5 + 0.2) * 0.35 + 0.05);
+                float3 ambientSky = lerp(nightAmbient, lerp(dayAmbient, sunsetAmbient, sunsetFactor), daylightFactor);
+                ambientSky = lerp(groundBounce, ambientSky, saturate(rayDir.y * 2.0));
+
                 float timeVal = (_CloudWindTime > 0.0001) ? _CloudWindTime : _Time.y;
-                float2 windDir = normalize(_CloudWindDirection.xy + float2(0.0001, 0.0));
-                float2 baseWindOffset = windDir * (_CloudWindSpeed * timeVal * 0.005);
 
-                // =========================================================================================
-                // Layer 1: Low-Altitude Main Cloud Deck (Cumulus / Stratocumulus)
-                // =========================================================================================
-                float curvature1 = 0.22;
-                float2 domeUV1 = (rayDir.xz / max(rayDir.y + curvature1, 0.04)) * _CloudScale * 1.5;
-                float2 sampleUV1 = domeUV1 + baseWindOffset;
+                float3 cloudColor = float3(0.0, 0.0, 0.0);
+                float totalTransmittance = 1.0;
 
-                float noise1 = FractalShape(sampleUV1, _Layer1Shape);
-                float rawDensity1 = saturate((noise1 - (1.0 - _CloudCoverage)) / max(_CloudCoverage, 0.01));
+                // Layer 1 (Low altitude)
+                ProcessCloudLayer(
+                    _Cloud_0_Tex,
+                    _Cloud_0_DetailTex,
+                    _Cloud_0_SampleParams,
+                    _Cloud_0_DetailParams.xy,
+                    _Cloud_0_SilverLiningParams.xy,
+                    _Cloud_0_MaskParams,
+                    _Cloud_0_LightingParams,
+                    _Cloud_0_WindVector,
+                    _Cloud_0_LightmarchSteps.xy,
+                    _Cloud_0_Color.rgb,
+                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, timeVal,
+                    _ParallaxTransitionedMainLightDir.xy,
+                    cloudColor, totalTransmittance);
 
-                float erodedDensity1 = rawDensity1;
-                if (rawDensity1 > 0.001)
-                {
-                    float detail1 = Perlin2D(sampleUV1 * 3.5 + baseWindOffset * 0.25);
-                    erodedDensity1 = saturate(rawDensity1 - (1.0 - detail1) * pow(saturate(1.0 - rawDensity1), 2.0) * _DetailErosion);
-                }
+                // Layer 2 (High altitude)
+                ProcessCloudLayer(
+                    _Cloud_1_Tex,
+                    _Cloud_1_DetailTex,
+                    _Cloud_1_SampleParams,
+                    _Cloud_1_DetailParams.xy,
+                    _Cloud_1_SilverLiningParams.xy,
+                    _Cloud_1_MaskParams,
+                    _Cloud_1_LightingParams,
+                    _Cloud_1_WindVector,
+                    _Cloud_1_LightmarchSteps.xy,
+                    _Cloud_1_Color.rgb,
+                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, timeVal,
+                    _ParallaxTransitionedMainLightDir.xy,
+                    cloudColor, totalTransmittance);
 
-                float finalDensity1 = erodedDensity1 * _CloudDensity * horizonFade;
-                float opacity1 = saturate(1.0 - exp(-finalDensity1 * 3.0));
-
-                float3 litColor1 = float3(0, 0, 0);
-                if (opacity1 > 0.001)
-                {
-                    float silverLining1 = pow(saturate(1.0 - erodedDensity1), 2.5) * hgPhase * _SilverLiningStrength;
-
-                    // Self-shadowing along light ray
-                    float2 shadowStep1 = -normalize(L.xz + float2(0.001, 0.001)) * 0.02;
-                    float shadowNoise1 = FractalShape(sampleUV1 + shadowStep1, _Layer1Shape);
-                    float shadowDensity1 = saturate((shadowNoise1 - (1.0 - _CloudCoverage)) / max(_CloudCoverage, 0.01));
-                    float selfShadow1 = exp(-shadowDensity1 * 3.2);
-
-                    litColor1 = lerp(_CloudShadowColor.rgb * ambientSkyTint, _CloudColor.rgb * filteredSun, selfShadow1);
-                    litColor1 += silverLining1 * filteredSun * 1.5;
-                }
-
-                float3 finalColor = litColor1 * opacity1;
-                float finalOpacity = opacity1;
-
-                // =========================================================================================
-                // Layer 2: High-Altitude Secondary Cloud Deck (Wispy Cirrus)
-                // =========================================================================================
-                if (_EnableLayer2 > 0.5)
-                {
-                    float curvature2 = 0.12;
-                    float2 domeUV2 = (rayDir.xz / max(rayDir.y + curvature2, 0.03)) * _Layer2Scale * 1.5;
-                    float2 sampleUV2 = domeUV2 + baseWindOffset * _Layer2SpeedMul;
-
-                    float noise2 = FractalShape(sampleUV2, _Layer2Shape);
-                    float rawDensity2 = saturate((noise2 - (1.0 - _Layer2Coverage)) / max(_Layer2Coverage, 0.01));
-
-                    float finalDensity2 = rawDensity2 * _Layer2Density * horizonFade;
-                    float opacity2 = saturate(1.0 - exp(-finalDensity2 * 2.2));
-
-                    if (opacity2 > 0.001)
-                    {
-                        float silverLining2 = pow(saturate(1.0 - rawDensity2), 2.0) * hgPhase * (_SilverLiningStrength * 0.6);
-                        float3 litColor2 = _CloudColor.rgb * filteredSun + silverLining2 * filteredSun;
-
-                        // Front-to-back layer compositing (Layer 1 in front, Layer 2 behind)
-                        finalColor += litColor2 * opacity2 * (1.0 - finalOpacity);
-                        finalOpacity = finalOpacity + opacity2 * (1.0 - finalOpacity);
-                    }
-                }
-
-                return half4(finalColor, finalOpacity);
+                float opacity = saturate(1.0 - totalTransmittance);
+                return half4(cloudColor, opacity);
             }
             ENDHLSL
         }
