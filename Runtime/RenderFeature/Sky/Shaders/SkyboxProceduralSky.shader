@@ -392,7 +392,6 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
                 // --- Crisp Sun Shape & Tight Coronal Halo (Deep Space) ---
                 float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
-                float sunBrightness = max(_SunBrightness, 0.0);
                 float3 sunRadiance = 6.0 * sunBrightness * saturate(sunTransmittance) * _SunColor.rgb;
                 float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
                 float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade;
