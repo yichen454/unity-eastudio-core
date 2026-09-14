@@ -24,7 +24,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         public BoolParameter enableMoon = new BoolParameter(true);
 
         [Tooltip("月亮视直径大小。")]
-        public ClampedFloatParameter moonSize = new ClampedFloatParameter(0.06f, 0.01f, 0.25f);
+        public ClampedFloatParameter moonSize = new ClampedFloatParameter(0.06f, 0.0f, 0.25f);
 
         [Tooltip("月亮视觉表面亮度倍率。")]
         public MinFloatParameter moonBrightness = new MinFloatParameter(1.2f, 0.0f);

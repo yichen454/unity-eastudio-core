@@ -9,7 +9,7 @@ namespace EAStudio.Core.RenderFeature.Sky
     {
         [Header("太阳与日冕 (Sun & Corona)")]
         [Tooltip("太阳本体光盘视直径大小。")]
-        public ClampedFloatParameter sunSize = new ClampedFloatParameter(0.04f, 0.001f, 0.2f);
+        public ClampedFloatParameter sunSize = new ClampedFloatParameter(0.04f, 0.0f, 0.2f);
 
         [Tooltip("太阳光晕聚合度指数（米氏前向散射衰减率，数值越大光晕越收拢紧实）。")]
         public ClampedFloatParameter sunConvergence = new ClampedFloatParameter(8f, 1f, 30f);

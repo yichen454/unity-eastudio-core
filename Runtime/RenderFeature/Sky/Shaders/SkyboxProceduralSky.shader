@@ -141,6 +141,9 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
             float CalcSunAttenuation(float3 lightPos, float3 ray, float sunSize, float sunConvergence)
             {
+                if (sunSize <= 0.00001)
+                    return 0.0;
+
                 float eyeCos = dot(lightPos, ray);
                 if (eyeCos <= 0.0)
                     return 0.0;
@@ -149,8 +152,8 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float dist2 = max(0.0, 2.0 * (1.0 - eyeCos));
                 float dist = sqrt(dist2);
 
-                // Core sun radius (angular radius scaled 1:1 with moonRadius)
-                float sunRadius = clamp(sunSize, 0.005, 0.2) * 0.40;
+                // Core sun radius (allows continuous shrinking down to a needle-point dot)
+                float sunRadius = max(sunSize, 0.0) * 0.40;
                 float normDist = dist / max(sunRadius, 1e-5);
 
                 // 1. Crisp Sun Disc with distinct limb boundary visible on all standard screens
@@ -210,8 +213,11 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float3 moonUp = cross(moonDir, moonRight);
 
                 // Angular projection (scaled 1:1 with sunRadius for visually consistent SIZE)
+                float moonRadius = max(_MoonParams.x, 0.0) * 0.40;
+                if (moonRadius <= 0.00001)
+                    return float4(0, 0, 0, 0);
+
                 float2 uvOffset = float2(dot(rayDir, moonRight), dot(rayDir, moonUp)) / eyeCos;
-                float moonRadius = clamp(_MoonParams.x, 0.008, 0.25) * 0.40;
                 float2 normUV = uvOffset / moonRadius;
                 float r2 = dot(normUV, normUV);
 
@@ -303,7 +309,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
                     lightDir = lightDir * rsqrt(lenSq);
 
                 float density = max(_AtmosphereThickness, 0.1) * max(_AerosolHaze, 0.1);
-                float sunSize = clamp(_SunSize, 0.005, 0.2);
+                float sunSize = max(_SunSize, 0.0);
                 float convergence = clamp(_SunConvergence, 1.0, 30.0);
                 float ozone = max(_OzoneAbsorption, 0.0);
 
