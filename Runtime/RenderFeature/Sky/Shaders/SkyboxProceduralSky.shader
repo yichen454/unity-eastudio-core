@@ -145,20 +145,22 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 if (eyeCos <= 0.0)
                     return 0.0;
 
-                // Angular distance squared: 2 * (1 - cos(theta)) ≈ theta^2
+                // Angular distance in radians: 2 * (1 - cos(theta)) ≈ theta^2
                 float dist2 = max(0.0, 2.0 * (1.0 - eyeCos));
+                float dist = sqrt(dist2);
 
-                // Core sun size (in radians)
-                float sunRadius = clamp(sunSize, 0.005, 0.2) * 0.35;
-                float sunR2 = sunRadius * sunRadius;
+                // Core sun radius (angular radius scaled 1:1 with moonRadius)
+                float sunRadius = clamp(sunSize, 0.005, 0.2) * 0.40;
+                float normDist = dist / max(sunRadius, 1e-5);
 
-                // 1. Soft Core: smooth Gaussian profile without hard edges
-                float core = exp(-dist2 / max(sunR2 * 0.85, 1e-6));
+                // 1. Crisp Sun Disc with distinct limb boundary visible on all standard screens
+                float discEdge = smoothstep(1.05, 0.94, normDist);
+                float core = discEdge * (1.0 + 2.5 * saturate(1.0 - normDist * 0.85));
 
-                // 2. Smooth Coronal Glow: natural bloom closely enveloping the sun
+                // 2. Smooth Coronal Glow enveloping the sun disc
                 float convergence = clamp(sunConvergence, 1.0, 30.0);
-                float haloSpread = sunRadius * (10.0 / convergence);
-                float halo = exp(-sqrt(dist2) / max(haloSpread, 1e-4)) * 0.3;
+                float haloSpread = sunRadius * (14.0 / convergence);
+                float halo = exp(-dist / max(haloSpread, 1e-4)) * 0.35;
 
                 return core + halo;
             }
@@ -193,8 +195,8 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
                 float3 moonDir = _MoonDirection.xyz;
                 float eyeCos = dot(rayDir, moonDir);
-                // Early exit: moon disc + halo covers at most 30 degrees (eyeCos > 0.75)
-                if (eyeCos < 0.75)
+                // Early exit: covers wide atmospheric halo up to ~50 degrees (eyeCos > 0.65)
+                if (eyeCos < 0.65)
                     return float4(0, 0, 0, 0);
 
                 float lenSq = dot(moonDir, moonDir);
@@ -207,9 +209,9 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float3 moonRight = normalize(cross(upRef, moonDir));
                 float3 moonUp = cross(moonDir, moonRight);
 
-                // Angular projection
+                // Angular projection (scaled 1:1 with sunRadius for visually consistent SIZE)
                 float2 uvOffset = float2(dot(rayDir, moonRight), dot(rayDir, moonUp)) / eyeCos;
-                float moonRadius = clamp(_MoonParams.x, 0.008, 0.25) * 0.45;
+                float moonRadius = clamp(_MoonParams.x, 0.008, 0.25) * 0.40;
                 float2 normUV = uvOffset / moonRadius;
                 float r2 = dot(normUV, normUV);
 
@@ -237,9 +239,12 @@ Shader "Skybox/EAStudio/ProceduralSky"
                     moonMask = discEdge;
                 }
 
-                // Moonlight coronal halo
+                // Expansive, multi-layer atmospheric moonlight halo
                 float haloIntensity = _MoonParams.w;
-                float moonHalo = pow(eyeCos, 80.0) * haloIntensity * 0.25 + pow(eyeCos, 350.0) * haloIntensity * 0.4;
+                float wideHalo = pow(eyeCos, 16.0) * 0.20;
+                float midHalo = pow(eyeCos, 60.0) * 0.35;
+                float innerHalo = pow(eyeCos, 200.0) * 0.45;
+                float moonHalo = (wideHalo + midHalo + innerHalo) * haloIntensity;
                 float3 haloColor = moonHalo * _MoonColor.rgb * (1.0 - moonMask * 0.85);
 
                 return float4(moonColor + haloColor, moonMask);

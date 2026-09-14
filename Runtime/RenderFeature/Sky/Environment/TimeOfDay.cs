@@ -163,41 +163,69 @@ namespace EAStudio.Core.RenderFeature.Sky
 
             float timeFraction = Mathf.Clamp01(timeOfDay / 24f);
 
-            // 1. Update Sun Light
+            // 1. Evaluate Sun and Moon activity and dominance
+            float sunElevationFade = Mathf.Clamp01((sunDir.y + 0.08f) / 0.15f);
+            float sunCurrentIntensity = sunMaxIntensity * sunElevationFade;
+            bool sunActive = sunElevationFade > 0.001f;
+
+            float moonElevationFade = Mathf.Clamp01((moonDir.y + 0.05f) / 0.15f);
+            float sunNightFade = Mathf.Clamp01((-sunDir.y + 0.05f) / 0.15f);
+            float totalMoonFade = moonElevationFade * sunNightFade;
+            float moonCurrentIntensity = moonMaxIntensity * totalMoonFade;
+            bool moonActive = totalMoonFade > 0.001f;
+
+            // Determine which celestial body is the dominant Main Light
+            // Prefer Sun during daylight, handover to Moon at night
+            bool isSunDominant = (sunCurrentIntensity >= moonCurrentIntensity) || (sunDir.y >= -0.02f);
+
+            // 2. Update Sun Light
             if (sunLight != null)
             {
                 sunLight.transform.forward = -sunDir;
-
-                // Elevation fade: 1.0 above horizon, fades smoothly to 0.0 as it sinks below horizon
-                float sunElevationFade = Mathf.Clamp01((sunDir.y + 0.08f) / 0.15f);
-                sunLight.intensity = sunMaxIntensity * sunElevationFade;
+                sunLight.intensity = sunCurrentIntensity;
                 sunLight.color = (sunColorGradient != null && sunColorGradient.colorKeys.Length > 0)
                     ? sunColorGradient.Evaluate(timeFraction)
                     : Color.white;
 
+                // Deactivate light when below horizon to completely eliminate Additional Light overhead
+                sunLight.enabled = sunActive;
+
                 if (manageShadows)
                 {
-                    sunLight.shadows = (sunElevationFade > 0.05f) ? celestialShadows : LightShadows.None;
+                    // Single Shadow Rule: Only the dominant celestial light casts cascaded shadows
+                    sunLight.shadows = (sunActive && isSunDominant) ? celestialShadows : LightShadows.None;
                 }
             }
 
-            // 2. Update Moon Light
+            // 3. Update Moon Light
             if (moonLight != null)
             {
                 moonLight.transform.forward = -moonDir;
-
-                // Moon elevation fade: only lights scene when moon is up AND sun is down
-                float moonElevationFade = Mathf.Clamp01((moonDir.y + 0.05f) / 0.15f);
-                float sunNightFade = Mathf.Clamp01((-sunDir.y + 0.05f) / 0.15f);
-                float totalMoonFade = moonElevationFade * sunNightFade;
-
-                moonLight.intensity = moonMaxIntensity * totalMoonFade;
+                moonLight.intensity = moonCurrentIntensity;
                 moonLight.color = moonColor;
+
+                // Deactivate light when inactive to eliminate AddLight overhead
+                moonLight.enabled = moonActive;
 
                 if (manageShadows)
                 {
-                    moonLight.shadows = (totalMoonFade > 0.05f) ? celestialShadows : LightShadows.None;
+                    // Single Shadow Rule: When night falls, Moon seamlessly takes over cascaded shadows
+                    moonLight.shadows = (moonActive && !isSunDominant) ? celestialShadows : LightShadows.None;
                 }
+            }
+
+            // 4. Dynamic Main Light Handover:
+            // Ensure RenderSettings.sun always points to the active dominant celestial light
+            // This gives the sun full cascaded shadows by day, and gives the moon full cascaded shadows by night!
+            if (isSunDominant)
+            {
+                if (sunLight != null && RenderSettings.sun != sunLight)
+                    RenderSettings.sun = sunLight;
+            }
+            else
+            {
+                if (moonLight != null && RenderSettings.sun != moonLight)
+                    RenderSettings.sun = moonLight;
             }
         }
 
