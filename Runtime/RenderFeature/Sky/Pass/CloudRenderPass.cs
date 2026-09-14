@@ -229,7 +229,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
             // Sunlight & Direction
             Vector3 sunDir = sunLight != null ? -sunLight.transform.forward : new Vector3(0f, 0.7071f, 0.7071f);
-            Color sunColor = sunLight != null ? sunLight.color : Color.white;
+            Color sunColor = (sunLight != null && sunLight.isActiveAndEnabled) ? (sunLight.color * sunLight.intensity) : Color.black;
 
             float thicknessVal = proceduralSky != null ? proceduralSky.atmosphereThickness.value : 1.0f;
 
@@ -334,7 +334,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
 
             Color baseMoonColor = moonSettings != null ? moonSettings.moonColor.value : new Color(0.92f, 0.95f, 1.0f, 1.0f);
-            Color moonLightColor = moonLight != null ? (moonLight.color * moonLight.intensity) : Color.white;
+            Color moonLightColor = (moonLight != null && moonLight.isActiveAndEnabled) ? (moonLight.color * moonLight.intensity) : (Color.white * 0.25f);
             Color moonColor = baseMoonColor * moonLightColor;
             float moonIntensity = (moonSettings == null || moonSettings.enableMoon.value) ?
                 (moonSettings != null ? moonSettings.cloudMoonlightIntensity.value : 0.7f) : 0.0f;

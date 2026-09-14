@@ -73,7 +73,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 moonLight = null;
 
             Vector3 sunDir = sun != null ? -sun.transform.forward : new Vector3(0f, 0.7071f, 0.7071f);
-            Color sunColor = sun != null ? (sun.color * sun.intensity) : Color.white;
+            Color sunColor = (sun != null && sun.isActiveAndEnabled) ? (sun.color * sun.intensity) : Color.black;
 
             bool enableMoon = moonSettings == null || moonSettings.enableMoon.value;
             Vector3 moonDir;
@@ -90,7 +90,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             float moonSize = moonSettings != null ? moonSettings.moonSize.value : 0.06f;
             float moonBrightness = moonSettings != null ? moonSettings.moonBrightness.value : 1.2f;
             Color baseMoonColor = moonSettings != null ? moonSettings.moonColor.value : new Color(0.92f, 0.95f, 1f, 1f);
-            Color moonLightColor = moonLight != null ? (moonLight.color * moonLight.intensity) : Color.white;
+            Color moonLightColor = (moonLight != null && moonLight.isActiveAndEnabled) ? moonLight.color : Color.white;
             Color moonColor = baseMoonColor * moonLightColor;
             float earthshine = moonSettings != null ? moonSettings.earthshine.value : 0.04f;
             float haloIntensity = moonSettings != null ? moonSettings.haloIntensity.value : 0.5f;

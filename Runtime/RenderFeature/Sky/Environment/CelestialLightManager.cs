@@ -41,8 +41,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static void RefreshLightCacheIfNeeded()
         {
             int currentFrame = Time.frameCount;
-            if (s_CachedSunLight != null && s_CachedSunLight.isActiveAndEnabled &&
-                (s_CachedMoonLight == null || (s_CachedMoonLight.isActiveAndEnabled && s_CachedMoonLight != s_CachedSunLight)) &&
+            if (s_CachedSunLight != null &&
+                (s_CachedMoonLight == null || s_CachedMoonLight != s_CachedSunLight) &&
                 Mathf.Abs(currentFrame - s_LastLightScanFrame) < 60)
             {
                 return;
@@ -52,29 +52,30 @@ namespace EAStudio.Core.RenderFeature.Sky
             s_CachedSunLight = null;
             s_CachedMoonLight = null;
 
-            if (TimeOfDay.Instance != null && TimeOfDay.Instance.sunLight != null && TimeOfDay.Instance.sunLight.isActiveAndEnabled)
+            // 1. If TimeOfDay controller is present, it explicitly owns celestial light bindings
+            // NEVER check isActiveAndEnabled to identify the celestial body: Sun is Sun even when sleeping at night!
+            if (TimeOfDay.Instance != null)
             {
-                s_CachedSunLight = TimeOfDay.Instance.sunLight;
-                if (TimeOfDay.Instance.moonLight != null && TimeOfDay.Instance.moonLight != s_CachedSunLight && TimeOfDay.Instance.moonLight.isActiveAndEnabled)
+                if (TimeOfDay.Instance.sunLight != null)
+                {
+                    s_CachedSunLight = TimeOfDay.Instance.sunLight;
+                }
+                if (TimeOfDay.Instance.moonLight != null && TimeOfDay.Instance.moonLight != s_CachedSunLight)
                 {
                     s_CachedMoonLight = TimeOfDay.Instance.moonLight;
                 }
                 return;
             }
 
-            if (RenderSettings.sun != null && RenderSettings.sun.isActiveAndEnabled)
-            {
-                s_CachedSunLight = RenderSettings.sun;
-            }
-
-            var lights = Object.FindObjectsByType<Light>(FindObjectsSortMode.None);
+            // 2. Scan scene lights by identity and name (exclude Moon from ever becoming Sun)
+            var lights = Object.FindObjectsByType<Light>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             Light sunFallback = null;
             Light moonFallback = null;
 
             for (int i = 0; i < lights.Length; i++)
             {
                 Light l = lights[i];
-                if (l.type != LightType.Directional || !l.isActiveAndEnabled)
+                if (l == null || l.type != LightType.Directional)
                     continue;
 
                 string name = l.name.ToLowerInvariant();
@@ -85,28 +86,20 @@ namespace EAStudio.Core.RenderFeature.Sky
                     else if (!name.Contains("moon") && sunFallback == null)
                         sunFallback = l;
                 }
+
+                if (s_CachedMoonLight == null)
+                {
+                    if (name.Contains("moon"))
+                        s_CachedMoonLight = l;
+                    else if (!name.Contains("sun") && moonFallback == null)
+                        moonFallback = l;
+                }
             }
 
             if (s_CachedSunLight == null)
                 s_CachedSunLight = sunFallback;
 
-            for (int i = 0; i < lights.Length; i++)
-            {
-                Light l = lights[i];
-                if (l.type != LightType.Directional || !l.isActiveAndEnabled || l == s_CachedSunLight)
-                    continue;
-
-                string name = l.name.ToLowerInvariant();
-                if (name.Contains("moon"))
-                {
-                    s_CachedMoonLight = l;
-                    break;
-                }
-                if (moonFallback == null)
-                    moonFallback = l;
-            }
-
-            if (s_CachedMoonLight == null)
+            if (s_CachedMoonLight == null && moonFallback != s_CachedSunLight)
                 s_CachedMoonLight = moonFallback;
         }
     }

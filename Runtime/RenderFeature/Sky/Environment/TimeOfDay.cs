@@ -214,18 +214,12 @@ namespace EAStudio.Core.RenderFeature.Sky
                 }
             }
 
-            // 4. Dynamic Main Light Handover:
-            // Ensure RenderSettings.sun always points to the active dominant celestial light
-            // This gives the sun full cascaded shadows by day, and gives the moon full cascaded shadows by night!
-            if (isSunDominant)
+            // 4. Main Light Reference:
+            // Keep RenderSettings.sun permanently bound to sunLight so the sun identity is never corrupted.
+            // When sunLight is disabled at night, URP automatically uses the active moonLight for main shadows.
+            if (sunLight != null && RenderSettings.sun != sunLight)
             {
-                if (sunLight != null && RenderSettings.sun != sunLight)
-                    RenderSettings.sun = sunLight;
-            }
-            else
-            {
-                if (moonLight != null && RenderSettings.sun != moonLight)
-                    RenderSettings.sun = moonLight;
+                RenderSettings.sun = sunLight;
             }
         }
 
