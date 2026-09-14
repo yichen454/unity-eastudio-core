@@ -376,6 +376,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
 
             // 3. State hash check
+            bool isInitialHdriBinding = (s_LastStateHash == -1);
             int hash;
             unchecked
             {
@@ -416,7 +417,10 @@ namespace EAStudio.Core.RenderFeature.Sky
             RenderSettings.ambientIntensity = lightingIntensity;
 
             // Notify Unity engine
-            DynamicGI.UpdateEnvironment();
+            if (isInitialHdriBinding || ambientMode == SkyAmbientMode.OnChanged)
+            {
+                DynamicGI.UpdateEnvironment();
+            }
         }
 
         public static void UpdateProceduralEnvironment(Camera camera, VisualEnvironment visualEnv, ProceduralSky proceduralSky, MoonSettings moonSettings = null, bool hasClouds = false)
@@ -578,6 +582,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
 
             // 4. State hash check
+            bool isInitialBinding = (s_LastStateHash == -1);
             int hash;
             unchecked
             {
@@ -604,11 +609,11 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + exposure.GetHashCode();
                 hash = hash * 31 + lightingMultiplier.GetHashCode();
                 hash = hash * 31 + ((int)ambientMode).GetHashCode();
+                hash = hash * 31 + (hasClouds ? 1 : 0);
 
                 if (hash == s_LastStateHash)
                     return;
 
-                bool isInitialBinding = (s_LastStateHash == -1);
                 s_LastStateHash = hash;
             }
 
