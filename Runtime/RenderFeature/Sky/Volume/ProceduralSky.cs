@@ -19,7 +19,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         [Header("大气物理散射 (Atmosphere Physics)")]
         [Tooltip("大气层厚度与瑞利散射密度倍率。")]
-        public ClampedFloatParameter atmosphereThickness = new ClampedFloatParameter(1.0f, 0.1f, 5.0f);
+        public ClampedFloatParameter atmosphereThickness = new ClampedFloatParameter(1.0f, 0.0f, 5.0f);
 
         [Tooltip("臭氧层吸收倍率。控制黄昏夕阳时的深紫/洋红晚霞过渡（0 为干旱黄昏橘色，1 为地球真实物理值，2+ 为魔幻异星深紫）。")]
         public ClampedFloatParameter ozoneAbsorption = new ClampedFloatParameter(1.0f, 0.0f, 5.0f);

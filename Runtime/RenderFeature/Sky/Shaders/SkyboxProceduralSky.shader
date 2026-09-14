@@ -273,13 +273,18 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 M = (1.0 - exp(-opticalDepth * densityM * C_MIE / MIE_MAX_LUM)) * MIE_MAX_LUM;
             }
 
-            // Direct solar transmittance through atmosphere (computes sunset reddening with ozone control)
+            // Direct solar transmittance through atmosphere (computes extinction and sunset reddening with density & ozone control)
             float3 GetAtmosphereSunTransmittance(float3 lightDir, float density, float multiplier, float ozoneMultiplier)
             {
-                float lightExtinctionAmount = exp(-(saturate(lightDir.y + 0.05) * 40.0)) +
+                // Physical optical path length:
+                // At high solar elevation, atmospheric optical depth is directly proportional to density (absorbing direct sunlight).
+                // Near the horizon (lightDir.y -> 0), optical path length surges up to 35x, creating vivid golden-red sunset reddening.
+                float zenithExtinction = 0.025 / max(lightDir.y + 0.1, 0.1);
+                float sunsetExtinction = exp(-(saturate(lightDir.y + 0.05) * 40.0)) +
                     exp(-(saturate(lightDir.y + 0.5) * 5.0)) * 0.4 +
-                    pow(saturate(1.0 - lightDir.y), 2.0) * 0.02 +
-                    0.002;
+                    pow(saturate(1.0 - lightDir.y), 2.0) * 0.02;
+                float lightExtinctionAmount = zenithExtinction + sunsetExtinction;
+
                 return exp(-(C_RAYLEIGH + C_MIE + C_OZONE * ozoneMultiplier) * lightExtinctionAmount * density * multiplier * 1e6);
             }
 
@@ -310,7 +315,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 else
                     lightDir = lightDir * rsqrt(lenSq);
 
-                float density = max(_AtmosphereThickness, 0.1) * max(_AerosolHaze, 0.1);
+                float density = max(_AtmosphereThickness, 0.0) * max(_AerosolHaze, 0.05);
                 float sunSize = max(_SunSize, 0.0);
                 float convergence = clamp(_SunConvergence, 1.0, 30.0);
                 float ozone = max(_OzoneAbsorption, 0.0);
@@ -344,9 +349,13 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float phaseR = PhaseRayleigh(costh);
                 float phaseM = PhaseM(costh, 0.88) * smoothstep(-0.35, -0.2, o_rayDir.y);
 
-                // Apply forward illuminated sunlight to atmosphere
+                float sunBrightness = max(_SunBrightness, 0.0);
+
+                // Forward Mie aerosol scattering: scale the intense forward solar glare hotspot by sunBrightness!
+                // When sunBrightness = 0, the bright forward glare spot is completely removed, leaving smooth diffuse sky!
+                float forwardMie = 1.0 + (phaseM - 1.0) * sunBrightness;
                 float3 rayleigh = (phaseR + phaseR * M_FAKE_MS) * lightColor + NIGHT_LIGHT * phaseR;
-                float3 mie = ((phaseM + phaseR * M_FAKE_MS) * lightColor + NIGHT_LIGHT * phaseR) * M_MIE;
+                float3 mie = ((forwardMie + phaseR * M_FAKE_MS) * lightColor * sunBrightness + NIGHT_LIGHT * phaseR) * M_MIE;
                 float3 scattering = mie * M + rayleigh * R;
 
                 // Night sky transition: fades in as sun descends below horizon
