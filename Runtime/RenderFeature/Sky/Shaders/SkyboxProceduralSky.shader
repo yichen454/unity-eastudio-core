@@ -378,7 +378,6 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float3 sunRadiance = 6.0 * saturate(sunTransmittance) * _SunColor.rgb;
                 float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
                 float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade;
-                scattering += sunFinal;
 
                 // --- Troposphere Cloud Deck Occlusion (covers Sun, Moon, and Deep Sky) ---
                 if (_HasClouds > 0.5)
@@ -386,11 +385,19 @@ Shader "Skybox/EAStudio/ProceduralSky"
                     float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
                     half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
-                    // Physical occlusion: dense clouds 100% block the solar disc and celestial backdrop;
-                    // thin wisps softly and gracefully filter the sunlight.
+                    // Direct solar beam Beer-Lambert exponential extinction:
+                    // An HDR sun (50.0+) easily burns through linear (1 - A).
+                    // Exponential attenuation combined with smoothstep threshold completely extinguishes
+                    // the solid sun disc under overcast clouds (cloud.a >= 0.5), while allowing thin wisps (cloud.a < 0.2) to softly filter light.
+                    float sunDirectBeam = exp(-cloud.a * 16.0) * smoothstep(0.55, 0.15, cloud.a);
+                    sunFinal *= sunDirectBeam;
+
+                    // Deep sky background occlusion (sky Rayleigh/Mie atmosphere + Moon + Stars)
                     float cloudTransmittance = saturate(1.0 - cloud.a);
                     scattering = scattering * cloudTransmittance + cloud.rgb;
                 }
+
+                scattering += sunFinal;
 
                 // Synchronize ground transition: ground smoothly covers sky, clouds, and sun below horizon!
                 float3 groundBase = _GroundColor.rgb * (saturate(lightDir.y * 2.0 + 0.2) * 0.6 + 0.1);
