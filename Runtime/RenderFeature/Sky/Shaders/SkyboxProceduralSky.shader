@@ -373,28 +373,24 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float4 moonData = CalcMoon(o_rayDir);
                 scattering = scattering * (1.0 - moonData.a) + moonData.rgb;
 
-                // --- Direct Cloud Sampling & Sun Occlusion (skipped when clouds are disabled) ---
-                float sunExtinction = 1.0;
+                // --- Crisp Sun Shape & Tight Coronal Halo (Deep Space) ---
+                float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
+                float3 sunRadiance = 6.0 * saturate(sunTransmittance) * _SunColor.rgb;
+                float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
+                float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade;
+                scattering += sunFinal;
+
+                // --- Troposphere Cloud Deck Occlusion (covers Sun, Moon, and Deep Sky) ---
                 if (_HasClouds > 0.5)
                 {
                     float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
                     half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
+                    // Physical occlusion: dense clouds 100% block the solar disc and celestial backdrop;
+                    // thin wisps softly and gracefully filter the sunlight.
                     float cloudTransmittance = saturate(1.0 - cloud.a);
-                    sunExtinction = max(cloudTransmittance * cloudTransmittance, 0.15 * cloudTransmittance + 0.08 * (1.0 - cloud.a * 0.8));
-
-                    if (cloud.a > 0.0001)
-                    {
-                        scattering = scattering * cloudTransmittance + cloud.rgb;
-                    }
+                    scattering = scattering * cloudTransmittance + cloud.rgb;
                 }
-
-                // --- Crisp Sun Shape & Tight Coronal Halo ---
-                float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
-                float3 sunRadiance = 6.0 * saturate(sunTransmittance) * _SunColor.rgb;
-                float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
-                float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade * sunExtinction;
-                scattering += sunFinal;
 
                 // Synchronize ground transition: ground smoothly covers sky, clouds, and sun below horizon!
                 float3 groundBase = _GroundColor.rgb * (saturate(lightDir.y * 2.0 + 0.2) * 0.6 + 0.1);
