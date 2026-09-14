@@ -64,7 +64,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         public void Update(Camera camera, VisualEnvironment visualEnv, ProceduralSky proceduralSky, MoonSettings moonSettings, bool hasClouds)
         {
-            if (visualEnv == null || visualEnv.skyAmbientMode.value == SkyAmbientMode.Off)
+            if (visualEnv == null || proceduralSky == null)
                 return;
 
             Light sun = CelestialLightManager.FindSunLight();
@@ -209,6 +209,10 @@ namespace EAStudio.Core.RenderFeature.Sky
 
                 m_LastStateHash = hash;
             }
+
+            // Ambient SH probe update: skip if ambient evaluation is turned Off
+            if (ambientMode == SkyAmbientMode.Off)
+                return;
 
             float ly = sunDir.y + Mathf.Clamp01(-sunDir.y + 0.02f) * Mathf.Clamp01(sunDir.y + 0.7f);
             ly = Mathf.Clamp(ly, -1f, 1f);

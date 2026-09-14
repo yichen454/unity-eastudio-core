@@ -45,7 +45,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         public void Update(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky)
         {
-            if (visualEnv == null || visualEnv.skyAmbientMode.value == SkyAmbientMode.Off || hdriSky == null || hdriSky.hdriSky.value == null)
+            if (visualEnv == null || hdriSky == null || hdriSky.hdriSky.value == null)
                 return;
 
             SkyVolumeBlendEvaluator.EvaluateHDRITransition(camera, hdriSky, out var cubemapA, out var cubemapB, out var blendWeight);
@@ -88,6 +88,10 @@ namespace EAStudio.Core.RenderFeature.Sky
 
                 m_LastStateHash = hash;
             }
+
+            // Ambient SH probe update: skip if ambient evaluation is turned Off
+            if (ambientMode == SkyAmbientMode.Off)
+                return;
 
             float lightingIntensity = lightingMultiplier;
             if (SphericalHarmonicsUtils.ExtractFromCubemap(cubemapA, out var baseSHA))

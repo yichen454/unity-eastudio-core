@@ -15,7 +15,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         public static void UpdateHDRIEnvironment(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky)
         {
-            if (visualEnv == null || visualEnv.skyAmbientMode.value == SkyAmbientMode.Off || hdriSky == null || hdriSky.hdriSky.value == null)
+            if (visualEnv == null || hdriSky == null || hdriSky.hdriSky.value == null)
             {
                 RestoreOriginalSkybox();
                 return;
@@ -26,7 +26,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         public static void UpdateProceduralEnvironment(Camera camera, VisualEnvironment visualEnv, ProceduralSky proceduralSky, MoonSettings moonSettings = null, bool hasClouds = false)
         {
-            if (visualEnv == null || visualEnv.skyAmbientMode.value == SkyAmbientMode.Off || proceduralSky == null)
+            if (visualEnv == null || proceduralSky == null)
             {
                 RestoreOriginalSkybox();
                 return;
