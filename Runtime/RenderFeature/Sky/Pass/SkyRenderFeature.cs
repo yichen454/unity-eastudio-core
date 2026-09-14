@@ -32,6 +32,13 @@ namespace EAStudio.Core.RenderFeature.Sky
 
             ProceduralSky proceduralSky = null;
             MoonSettings moonSettings = stack.GetComponent<MoonSettings>();
+            CloudSettings cloudSettings = (visualEnv.cloudType.value != CloudType.None) ? stack.GetComponent<CloudSettings>() : null;
+            bool hasActiveClouds = cloudSettings != null && (
+                (cloudSettings.enableLayer1.value && cloudSettings.coverage.value > 0.001f) ||
+                (cloudSettings.enableLayer2.value && cloudSettings.layer2Coverage.value > 0.001f)
+            );
+
+            Light sunLight = SkyEnvironmentSync.FindSunLight();
 
             // 1. Skybox background evaluation and update
             if (visualEnv.skyType.value == SkyType.HDRI)
@@ -48,20 +55,13 @@ namespace EAStudio.Core.RenderFeature.Sky
             else if (visualEnv.skyType.value == SkyType.Procedural)
             {
                 proceduralSky = stack.GetComponent<ProceduralSky>();
-                SkyEnvironmentSync.UpdateProceduralEnvironment(camera, visualEnv, proceduralSky, moonSettings);
+                SkyEnvironmentSync.UpdateProceduralEnvironment(camera, visualEnv, proceduralSky, moonSettings, hasActiveClouds);
             }
 
             // 2. Cloud layer: Only generate low-res cloud map before opaques
             // Composition is done directly inside SkyboxProceduralSky without a second pass!
             if (visualEnv.cloudType.value != CloudType.None && m_CloudRenderPass != null)
             {
-                CloudSettings cloudSettings = stack.GetComponent<CloudSettings>();
-                bool hasActiveClouds = cloudSettings != null && (
-                    (cloudSettings.enableLayer1.value && cloudSettings.coverage.value > 0.001f) ||
-                    (cloudSettings.enableLayer2.value && cloudSettings.layer2Coverage.value > 0.001f)
-                );
-
-                Light sunLight = SkyEnvironmentSync.FindSunLight();
 
                 if (hasActiveClouds)
                 {
@@ -99,7 +99,6 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
             else
             {
-                Light sunLight = SkyEnvironmentSync.FindSunLight();
                 if (sunLight != null && m_CloudRenderPass != null && sunLight.cookie == m_CloudRenderPass.ShadowCookieTexture)
                 {
                     sunLight.cookie = null;

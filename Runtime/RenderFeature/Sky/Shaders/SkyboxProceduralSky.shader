@@ -89,6 +89,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float _NightExposure;
                 float _NightRotation;
                 float _HasNightSkyMap;
+                float _HasClouds;
 
                 float4 _MoonDirection;
                 float4 _MoonLightLocal;
@@ -191,6 +192,11 @@ Shader "Skybox/EAStudio/ProceduralSky"
                     return float4(0, 0, 0, 0);
 
                 float3 moonDir = _MoonDirection.xyz;
+                float eyeCos = dot(rayDir, moonDir);
+                // Early exit: moon disc + halo covers at most 30 degrees (eyeCos > 0.75)
+                if (eyeCos < 0.75)
+                    return float4(0, 0, 0, 0);
+
                 float lenSq = dot(moonDir, moonDir);
                 if (lenSq < 0.001)
                     return float4(0, 0, 0, 0);
@@ -200,10 +206,6 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float3 upRef = abs(moonDir.y) > 0.99 ? float3(0, 0, 1) : float3(0, 1, 0);
                 float3 moonRight = normalize(cross(upRef, moonDir));
                 float3 moonUp = cross(moonDir, moonRight);
-
-                float eyeCos = dot(rayDir, moonDir);
-                if (eyeCos <= 0.0)
-                    return float4(0, 0, 0, 0);
 
                 // Angular projection
                 float2 uvOffset = float2(dot(rayDir, moonRight), dot(rayDir, moonUp)) / eyeCos;
@@ -274,6 +276,18 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
                 float3 rayDir = normalize(input.texcoord);
                 float3 o_rayDir = rayDir;
+
+                float fadeWidth = clamp(_GroundFade, 0.02, 1.0);
+                float groundBlend = smoothstep(0.0, fadeWidth, saturate(-o_rayDir.y));
+
+                // Early exit when looking below the horizon:
+                // Skips 100% of atmospheric scattering, sphere intersections, and texture samples for the ground!
+                if (groundBlend >= 0.999)
+                {
+                    float3 groundBase = _GroundColor.rgb * (saturate(_SunDirection.y * 2.0 + 0.2) * 0.6 + 0.1);
+                    float exposure = _Exposure <= 0.001 ? 1.0 : _Exposure;
+                    return half4(groundBase * exposure, 1.0);
+                }
 
                 // Safe sun direction extraction
                 float3 lightDir = _SunDirection.xyz;
@@ -354,29 +368,27 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float4 moonData = CalcMoon(o_rayDir);
                 scattering = scattering * (1.0 - moonData.a) + moonData.rgb;
 
-                // --- Direct Cloud Sampling & Sun Occlusion ---
-                float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
-                half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
+                // --- Direct Cloud Sampling & Sun Occlusion (skipped when clouds are disabled) ---
+                float sunExtinction = 1.0;
+                if (_HasClouds > 0.5)
+                {
+                    float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
+                    half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
-                // Cloud transmittance: thick clouds soften and diffuse the sun disc (never turning into a dark hole)
-                float cloudTransmittance = saturate(1.0 - cloud.a);
-                float sunExtinction = max(cloudTransmittance * cloudTransmittance, 0.15 * cloudTransmittance + 0.08 * (1.0 - cloud.a * 0.8));
+                    float cloudTransmittance = saturate(1.0 - cloud.a);
+                    sunExtinction = max(cloudTransmittance * cloudTransmittance, 0.15 * cloudTransmittance + 0.08 * (1.0 - cloud.a * 0.8));
 
-                // Ground & Horizon transition width
-                float fadeWidth = clamp(_GroundFade, 0.02, 1.0);
-                float groundBlend = smoothstep(0.0, fadeWidth, saturate(-o_rayDir.y));
+                    if (cloud.a > 0.0001)
+                    {
+                        scattering = scattering * cloudTransmittance + cloud.rgb;
+                    }
+                }
 
                 // --- Crisp Sun Shape & Tight Coronal Halo ---
                 float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
                 float3 sunRadiance = 6.0 * saturate(sunTransmittance) * _SunColor.rgb;
                 float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
                 float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade * sunExtinction;
-
-                // Composite: Sky background is occluded by cloud, then sun is added, plus cloud color
-                if (cloud.a > 0.0001)
-                {
-                    scattering = scattering * cloudTransmittance + cloud.rgb;
-                }
                 scattering += sunFinal;
 
                 // Synchronize ground transition: ground smoothly covers sky, clouds, and sun below horizon!

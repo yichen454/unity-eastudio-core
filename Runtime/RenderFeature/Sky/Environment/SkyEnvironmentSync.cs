@@ -46,6 +46,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_NightExposureID = Shader.PropertyToID("_NightExposure");
         private static readonly int s_NightRotationID = Shader.PropertyToID("_NightRotation");
         private static readonly int s_HasNightSkyMapID = Shader.PropertyToID("_HasNightSkyMap");
+        private static readonly int s_HasCloudsID = Shader.PropertyToID("_HasClouds");
         private static readonly int s_MoonDirectionID = Shader.PropertyToID("_MoonDirection");
         private static readonly int s_MoonLightLocalID = Shader.PropertyToID("_MoonLightLocal");
         private static readonly int s_MoonParamsID = Shader.PropertyToID("_MoonParams");
@@ -105,64 +106,92 @@ namespace EAStudio.Core.RenderFeature.Sky
             return s_ProceduralSkyboxMaterial;
         }
 
-        public static Light FindSunLight()
+        private static Light s_CachedSunLight;
+        private static Light s_CachedMoonLight;
+        private static int s_LastLightScanFrame = -1000;
+
+        private static void RefreshLightCacheIfNeeded()
         {
+            int currentFrame = Time.frameCount;
+            if (s_CachedSunLight != null && s_CachedSunLight.isActiveAndEnabled &&
+                (s_CachedMoonLight == null || (s_CachedMoonLight.isActiveAndEnabled && s_CachedMoonLight != s_CachedSunLight)) &&
+                Mathf.Abs(currentFrame - s_LastLightScanFrame) < 60)
+            {
+                return;
+            }
+
+            s_LastLightScanFrame = currentFrame;
+            s_CachedSunLight = null;
+            s_CachedMoonLight = null;
+
             if (TimeOfDay.Instance != null && TimeOfDay.Instance.sunLight != null && TimeOfDay.Instance.sunLight.isActiveAndEnabled)
-                return TimeOfDay.Instance.sunLight;
+            {
+                s_CachedSunLight = TimeOfDay.Instance.sunLight;
+                if (TimeOfDay.Instance.moonLight != null && TimeOfDay.Instance.moonLight != s_CachedSunLight && TimeOfDay.Instance.moonLight.isActiveAndEnabled)
+                {
+                    s_CachedMoonLight = TimeOfDay.Instance.moonLight;
+                }
+                return;
+            }
 
             if (RenderSettings.sun != null && RenderSettings.sun.isActiveAndEnabled)
-                return RenderSettings.sun;
+            {
+                s_CachedSunLight = RenderSettings.sun;
+            }
 
             var lights = Object.FindObjectsByType<Light>(FindObjectsSortMode.None);
-            Light fallback = null;
+            Light sunFallback = null;
+            Light moonFallback = null;
+
             for (int i = 0; i < lights.Length; i++)
             {
                 Light l = lights[i];
-                if (l.type == LightType.Directional && l.isActiveAndEnabled)
+                if (l.type != LightType.Directional || !l.isActiveAndEnabled)
+                    continue;
+
+                string name = l.name.ToLowerInvariant();
+                if (s_CachedSunLight == null)
                 {
-                    string name = l.name.ToLowerInvariant();
                     if (name.Contains("sun"))
-                        return l;
-                    if (!name.Contains("moon") && fallback == null)
-                        fallback = l;
+                        s_CachedSunLight = l;
+                    else if (!name.Contains("moon") && sunFallback == null)
+                        sunFallback = l;
                 }
             }
 
-            return fallback;
+            if (s_CachedSunLight == null)
+                s_CachedSunLight = sunFallback;
+
+            for (int i = 0; i < lights.Length; i++)
+            {
+                Light l = lights[i];
+                if (l.type != LightType.Directional || !l.isActiveAndEnabled || l == s_CachedSunLight)
+                    continue;
+
+                string name = l.name.ToLowerInvariant();
+                if (name.Contains("moon"))
+                {
+                    s_CachedMoonLight = l;
+                    break;
+                }
+                if (moonFallback == null)
+                    moonFallback = l;
+            }
+
+            if (s_CachedMoonLight == null)
+                s_CachedMoonLight = moonFallback;
+        }
+
+        public static Light FindSunLight()
+        {
+            RefreshLightCacheIfNeeded();
+            return s_CachedSunLight;
         }
 
         public static Light FindMoonLight()
         {
-            Light sun = FindSunLight();
-
-            if (TimeOfDay.Instance != null && TimeOfDay.Instance.moonLight != null && TimeOfDay.Instance.moonLight != sun && TimeOfDay.Instance.moonLight.isActiveAndEnabled)
-                return TimeOfDay.Instance.moonLight;
-
-            var lights = Object.FindObjectsByType<Light>(FindObjectsSortMode.None);
-            Light nonMoonFallback = null;
-            for (int i = 0; i < lights.Length; i++)
-            {
-                Light l = lights[i];
-                if (l.type == LightType.Directional && l != sun && l.isActiveAndEnabled)
-                {
-                    string name = l.name.ToLowerInvariant();
-                    if (name.Contains("moon"))
-                        return l;
-                    if (nonMoonFallback == null)
-                        nonMoonFallback = l;
-                }
-            }
-
-            return nonMoonFallback;
-        }
-
-        private static void CleanupLegacyProbes()
-        {
-            GameObject oldProbe = GameObject.Find("[SkyVolume_ReflectionProbe]");
-            if (oldProbe != null)
-            {
-                CoreUtils.Destroy(oldProbe);
-            }
+            RefreshLightCacheIfNeeded();
+            return s_CachedMoonLight;
         }
 
         /// <summary>
@@ -218,7 +247,6 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         public static void UpdateHDRIEnvironment(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky)
         {
-            CleanupLegacyProbes();
 
             if (visualEnv == null || visualEnv.skyAmbientMode.value == SkyAmbientMode.Off)
             {
@@ -361,7 +389,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + tint.GetHashCode();
                 hash = hash * 31 + ((int)ambientMode).GetHashCode();
 
-                if (ambientMode == SkyAmbientMode.OnChanged && hash == s_LastStateHash)
+                if (hash == s_LastStateHash)
                     return;
 
                 s_LastStateHash = hash;
@@ -391,9 +419,8 @@ namespace EAStudio.Core.RenderFeature.Sky
             DynamicGI.UpdateEnvironment();
         }
 
-        public static void UpdateProceduralEnvironment(Camera camera, VisualEnvironment visualEnv, ProceduralSky proceduralSky, MoonSettings moonSettings = null)
+        public static void UpdateProceduralEnvironment(Camera camera, VisualEnvironment visualEnv, ProceduralSky proceduralSky, MoonSettings moonSettings = null, bool hasClouds = false)
         {
-            CleanupLegacyProbes();
 
             if (visualEnv == null || visualEnv.skyAmbientMode.value == SkyAmbientMode.Off)
             {
@@ -521,6 +548,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 skyMat.SetColor(s_GroundColorID, groundColor);
                 skyMat.SetColor(s_NightSkyColorID, nightSkyColor);
                 skyMat.SetFloat(s_ExposureID, exposure);
+                skyMat.SetFloat(s_HasCloudsID, hasClouds ? 1.0f : 0.0f);
 
                 // Moon parameters
                 skyMat.SetVector(s_MoonDirectionID, new Vector4(moonDir.x, moonDir.y, moonDir.z, 0f));
@@ -577,9 +605,10 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + lightingMultiplier.GetHashCode();
                 hash = hash * 31 + ((int)ambientMode).GetHashCode();
 
-                if (ambientMode == SkyAmbientMode.OnChanged && hash == s_LastStateHash)
+                if (hash == s_LastStateHash)
                     return;
 
+                bool isInitialBinding = (s_LastStateHash == -1);
                 s_LastStateHash = hash;
             }
 
@@ -633,13 +662,16 @@ namespace EAStudio.Core.RenderFeature.Sky
             RenderSettings.ambientProbe = finalSH;
             RenderSettings.ambientIntensity = lightingMultiplier;
 
-            // Notify Unity engine
-            DynamicGI.UpdateEnvironment();
+            // In Realtime mode, RenderSettings.ambientProbe = finalSH updates all shaders directly every frame without engine stalls!
+            // DynamicGI.UpdateEnvironment forces full GI/ReflectionProbe invalidation, so only call on initial binding or OnChanged mode.
+            if (isInitialBinding || ambientMode == SkyAmbientMode.OnChanged)
+            {
+                DynamicGI.UpdateEnvironment();
+            }
         }
 
         public static void RestoreOriginalSkybox()
         {
-            CleanupLegacyProbes();
 
             if (s_HasStoredOriginal)
             {
