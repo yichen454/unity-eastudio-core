@@ -175,7 +175,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 SkyboxMaterialManager.ApplySkybox(skyMat);
             }
 
-            bool isInitialBinding = (m_LastStateHash == -1);
             int hash;
             unchecked
             {
@@ -256,10 +255,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             RenderSettings.ambientProbe = finalSH;
             RenderSettings.ambientIntensity = lightingMultiplier;
 
-            if (isInitialBinding || ambientMode == SkyAmbientMode.OnChanged)
-            {
-                DynamicGI.UpdateEnvironment();
-            }
+
         }
 
         public void ResetState()
