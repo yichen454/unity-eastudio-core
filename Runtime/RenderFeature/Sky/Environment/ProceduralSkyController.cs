@@ -14,6 +14,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_SunDirectionID = Shader.PropertyToID("_SunDirection");
         private static readonly int s_SunColorID = Shader.PropertyToID("_SunColor");
         private static readonly int s_SunSizeID = Shader.PropertyToID("_SunSize");
+        private static readonly int s_SunBrightnessID = Shader.PropertyToID("_SunBrightness");
         private static readonly int s_SunConvergenceID = Shader.PropertyToID("_SunConvergence");
         private static readonly int s_AtmosphereThicknessID = Shader.PropertyToID("_AtmosphereThickness");
         private static readonly int s_OzoneAbsorptionID = Shader.PropertyToID("_OzoneAbsorption");
@@ -121,6 +122,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
             float exposure = (proceduralSky != null && proceduralSky.exposure.value > 0.001f) ? proceduralSky.exposure.value : 1.0f;
             float sunSize = proceduralSky != null ? proceduralSky.sunSize.value : 0.04f;
+            float sunBrightness = (proceduralSky != null && proceduralSky.sunBrightness != null) ? proceduralSky.sunBrightness.value : 1.0f;
             float sunConvergence = proceduralSky != null ? proceduralSky.sunConvergence.value : 8.0f;
             float thickness = proceduralSky != null ? proceduralSky.atmosphereThickness.value : 1.0f;
             float ozone = proceduralSky != null ? proceduralSky.ozoneAbsorption.value : 1.0f;
@@ -141,6 +143,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 skyMat.SetVector(s_SunDirectionID, new Vector4(sunDir.x, sunDir.y, sunDir.z, 0f));
                 skyMat.SetColor(s_SunColorID, sunColor);
                 skyMat.SetFloat(s_SunSizeID, sunSize);
+                skyMat.SetFloat(s_SunBrightnessID, sunBrightness);
                 skyMat.SetFloat(s_SunConvergenceID, sunConvergence);
                 skyMat.SetFloat(s_AtmosphereThicknessID, thickness);
                 skyMat.SetFloat(s_OzoneAbsorptionID, ozone);
@@ -182,6 +185,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + sunDir.GetHashCode();
                 hash = hash * 31 + sunColor.GetHashCode();
                 hash = hash * 31 + sunSize.GetHashCode();
+                hash = hash * 31 + sunBrightness.GetHashCode();
                 hash = hash * 31 + sunConvergence.GetHashCode();
                 hash = hash * 31 + thickness.GetHashCode();
                 hash = hash * 31 + ozone.GetHashCode();

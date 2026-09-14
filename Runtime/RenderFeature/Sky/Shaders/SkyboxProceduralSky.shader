@@ -32,6 +32,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
         [HideInInspector] _SunDirection ("Sun Direction", Vector) = (0, 0.707, 0.707, 0)
         [HideInInspector] _SunColor ("Sun Color", Color) = (1, 1, 1, 1)
+        [HideInInspector] _SunBrightness ("Sun Brightness", Float) = 1.0
     }
 
     SubShader
@@ -85,6 +86,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float4 _NightSkyColor;
                 float4 _SunDirection;
                 float4 _SunColor;
+                float _SunBrightness;
 
                 float _NightExposure;
                 float _NightRotation;
@@ -381,7 +383,8 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
                 // --- Crisp Sun Shape & Tight Coronal Halo (Deep Space) ---
                 float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
-                float3 sunRadiance = 6.0 * saturate(sunTransmittance) * _SunColor.rgb;
+                float sunBrightness = max(_SunBrightness, 0.0);
+                float3 sunRadiance = 6.0 * sunBrightness * saturate(sunTransmittance) * _SunColor.rgb;
                 float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
                 float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade;
 

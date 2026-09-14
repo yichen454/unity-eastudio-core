@@ -11,6 +11,9 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("太阳本体光盘视直径大小。")]
         public ClampedFloatParameter sunSize = new ClampedFloatParameter(0.04f, 0.0f, 0.2f);
 
+        [Tooltip("太阳在天空盒上的视觉表面与日冕亮度倍率（1.0 为默认基准亮度，调大更耀眼，调小更柔和）。")]
+        public MinFloatParameter sunBrightness = new MinFloatParameter(1.0f, 0.0f);
+
         [Tooltip("太阳光晕聚合度指数（米氏前向散射衰减率，数值越大光晕越收拢紧实）。")]
         public ClampedFloatParameter sunConvergence = new ClampedFloatParameter(8f, 1f, 30f);
 
@@ -53,6 +56,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             {
                 int hash = base.GetParameterHashCode();
                 hash = hash * 31 + sunSize.value.GetHashCode();
+                hash = hash * 31 + sunBrightness.value.GetHashCode();
                 hash = hash * 31 + sunConvergence.value.GetHashCode();
                 hash = hash * 31 + atmosphereThickness.value.GetHashCode();
                 hash = hash * 31 + ozoneAbsorption.value.GetHashCode();
