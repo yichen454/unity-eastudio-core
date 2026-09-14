@@ -84,12 +84,42 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_WindTimeID = Shader.PropertyToID("_CloudWindTime");
 
         private readonly LowResPass m_LowResPass;
+        private RenderPassEvent m_RenderPassEvent = RenderPassEvent.BeforeRenderingOpaques;
 
         public LowResPass LowRes => m_LowResPass;
+        public RenderPassEvent RenderPassEvent => m_RenderPassEvent;
 
-        public CloudRenderPass()
+        private Shader m_GeneratorShaderOverride;
+        private Shader m_CookieShaderOverride;
+
+        public CloudRenderPass(Shader generatorShader = null, Shader cookieShader = null, RenderPassEvent renderPassEvent = RenderPassEvent.BeforeRenderingOpaques)
         {
+            m_GeneratorShaderOverride = generatorShader;
+            m_CookieShaderOverride = cookieShader;
+            m_RenderPassEvent = renderPassEvent;
             m_LowResPass = new LowResPass(this);
+        }
+
+        public void SetShaderOverrides(Shader generatorShader, Shader cookieShader)
+        {
+            if (generatorShader != null && m_GeneratorShaderOverride != generatorShader)
+            {
+                m_GeneratorShaderOverride = generatorShader;
+                if (m_GeneratorMaterial != null && m_GeneratorMaterial.shader != generatorShader)
+                {
+                    CoreUtils.Destroy(m_GeneratorMaterial);
+                    m_GeneratorMaterial = null;
+                }
+            }
+            if (cookieShader != null && m_CookieShaderOverride != cookieShader)
+            {
+                m_CookieShaderOverride = cookieShader;
+                if (m_CookieMaterial != null && m_CookieMaterial.shader != cookieShader)
+                {
+                    CoreUtils.Destroy(m_CookieMaterial);
+                    m_CookieMaterial = null;
+                }
+            }
         }
 
         private bool EnsureMaterial()
@@ -97,8 +127,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (m_GeneratorMaterial != null)
                 return true;
 
-            if (m_GeneratorShader == null)
-                m_GeneratorShader = Shader.Find(k_GeneratorShader);
+            m_GeneratorShader = m_GeneratorShaderOverride != null ? m_GeneratorShaderOverride : Shader.Find(k_GeneratorShader);
 
             if (m_GeneratorShader != null)
                 m_GeneratorMaterial = CoreUtils.CreateEngineMaterial(m_GeneratorShader);
@@ -111,8 +140,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (m_CookieMaterial != null)
                 return true;
 
-            if (m_CookieShader == null)
-                m_CookieShader = Shader.Find(k_CookieShader);
+            m_CookieShader = m_CookieShaderOverride != null ? m_CookieShaderOverride : Shader.Find(k_CookieShader);
 
             if (m_CookieShader != null)
                 m_CookieMaterial = CoreUtils.CreateEngineMaterial(m_CookieShader);
@@ -392,7 +420,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             public LowResPass(CloudRenderPass parent)
             {
                 m_Parent = parent;
-                renderPassEvent = RenderPassEvent.BeforeRenderingOpaques;
+                renderPassEvent = m_Parent.m_RenderPassEvent;
             }
 
             private class PassData

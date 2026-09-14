@@ -36,6 +36,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_MoonTextureID = Shader.PropertyToID("_MoonTexture");
         private static readonly int s_EnableMoonID = Shader.PropertyToID("_EnableMoon");
 
+        private Shader m_ShaderOverride;
         private Shader m_Shader;
         private Material m_Material;
         private Texture2D m_MoonSurfaceTex;
@@ -43,14 +44,25 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         public Material Material => EnsureMaterial();
 
+        public void SetShaderOverride(Shader shader)
+        {
+            if (shader != null && m_ShaderOverride != shader)
+            {
+                m_ShaderOverride = shader;
+                if (m_Material != null && m_Material.shader != shader)
+                {
+                    CoreUtils.Destroy(m_Material);
+                    m_Material = null;
+                }
+            }
+        }
+
         public Material EnsureMaterial()
         {
             if (m_Material != null)
                 return m_Material;
 
-            if (m_Shader == null)
-                m_Shader = Shader.Find(k_ProceduralPath);
-
+            m_Shader = m_ShaderOverride != null ? m_ShaderOverride : Shader.Find(k_ProceduralPath);
             if (m_Shader == null)
                 m_Shader = Shader.Find("Skybox/Procedural");
 

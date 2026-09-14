@@ -13,6 +13,12 @@ namespace EAStudio.Core.RenderFeature.Sky
         public static Light FindSunLight() => CelestialLightManager.FindSunLight();
         public static Light FindMoonLight() => CelestialLightManager.FindMoonLight();
 
+        public static void SetShaderOverrides(Shader hdriShader, Shader proceduralShader)
+        {
+            s_HDRIController.SetShaderOverride(hdriShader);
+            s_ProceduralController.SetShaderOverride(proceduralShader);
+        }
+
         public static void UpdateHDRIEnvironment(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky)
         {
             if (visualEnv == null || hdriSky == null || hdriSky.hdriSky.value == null)

@@ -17,20 +17,32 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_ExposureID = Shader.PropertyToID("_Exposure");
         private static readonly int s_TintID = Shader.PropertyToID("_Tint");
 
+        private Shader m_ShaderOverride;
         private Shader m_Shader;
         private Material m_Material;
         private int m_LastStateHash = -1;
 
         public Material Material => EnsureMaterial();
 
+        public void SetShaderOverride(Shader shader)
+        {
+            if (shader != null && m_ShaderOverride != shader)
+            {
+                m_ShaderOverride = shader;
+                if (m_Material != null && m_Material.shader != shader)
+                {
+                    CoreUtils.Destroy(m_Material);
+                    m_Material = null;
+                }
+            }
+        }
+
         public Material EnsureMaterial()
         {
             if (m_Material != null)
                 return m_Material;
 
-            if (m_Shader == null)
-                m_Shader = Shader.Find(k_HDRIPath);
-
+            m_Shader = m_ShaderOverride != null ? m_ShaderOverride : Shader.Find(k_HDRIPath);
             if (m_Shader == null)
                 m_Shader = Shader.Find("Skybox/Cubemap");
 

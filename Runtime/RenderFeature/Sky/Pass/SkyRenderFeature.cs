@@ -6,11 +6,56 @@ namespace EAStudio.Core.RenderFeature.Sky
 {
     public class SkyRenderFeature : ScriptableRendererFeature
     {
+        [System.Serializable]
+        public class SkyShaderResources
+        {
+            [SerializeField] public Shader proceduralSkyShader;
+            [SerializeField] public Shader hdriSkyShader;
+            [SerializeField] public Shader cloudGeneratorShader;
+            [SerializeField] public Shader cloudShadowCookieShader;
+        }
+
+        [SerializeField, HideInInspector]
+        private SkyShaderResources m_Shaders = new SkyShaderResources();
+
+        [SerializeField]
+        private RenderPassEvent m_CloudRenderPassEvent = RenderPassEvent.BeforeRenderingOpaques;
+
         private CloudRenderPass m_CloudRenderPass;
 
         public override void Create()
         {
-            m_CloudRenderPass = new CloudRenderPass();
+            EnsureShaders();
+            m_CloudRenderPass = new CloudRenderPass(m_Shaders?.cloudGeneratorShader, m_Shaders?.cloudShadowCookieShader, m_CloudRenderPassEvent);
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            EnsureShaders();
+        }
+
+        private void Reset()
+        {
+            EnsureShaders();
+        }
+#endif
+
+        public void EnsureShaders()
+        {
+            if (m_Shaders == null)
+                m_Shaders = new SkyShaderResources();
+
+#if UNITY_EDITOR
+            if (m_Shaders.proceduralSkyShader == null)
+                m_Shaders.proceduralSkyShader = Shader.Find("Skybox/EAStudio/ProceduralSky");
+            if (m_Shaders.hdriSkyShader == null)
+                m_Shaders.hdriSkyShader = Shader.Find("Skybox/EAStudio/HDRISky");
+            if (m_Shaders.cloudGeneratorShader == null)
+                m_Shaders.cloudGeneratorShader = Shader.Find("Hidden/EAStudio/CloudGenerator");
+            if (m_Shaders.cloudShadowCookieShader == null)
+                m_Shaders.cloudShadowCookieShader = Shader.Find("Hidden/EAStudio/CloudShadowCookie");
+#endif
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
@@ -37,6 +82,13 @@ namespace EAStudio.Core.RenderFeature.Sky
                 (cloudSettings.enableLayer1.value && cloudSettings.coverage.value > 0.001f) ||
                 (cloudSettings.enableLayer2.value && cloudSettings.layer2Coverage.value > 0.001f)
             );
+
+            EnsureShaders();
+            SkyEnvironmentSync.SetShaderOverrides(m_Shaders?.hdriSkyShader, m_Shaders?.proceduralSkyShader);
+            if (m_CloudRenderPass != null)
+            {
+                m_CloudRenderPass.SetShaderOverrides(m_Shaders?.cloudGeneratorShader, m_Shaders?.cloudShadowCookieShader);
+            }
 
             Light sunLight = SkyEnvironmentSync.FindSunLight();
 
