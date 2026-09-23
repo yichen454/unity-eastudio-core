@@ -78,6 +78,9 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_GroundColorID = Shader.PropertyToID("_GroundColor");
         private static readonly int s_GroundFadeID = Shader.PropertyToID("_GroundFade");
         private static readonly int s_NightSkyColorID = Shader.PropertyToID("_NightSkyColor");
+        private static readonly int s_AmbientSkyColorID = Shader.PropertyToID("_AmbientSkyColor");
+        private static readonly int s_AmbientSunsetColorID = Shader.PropertyToID("_AmbientSunsetColor");
+        private static readonly int s_ShadowColorID = Shader.PropertyToID("_ShadowColor");
         private static readonly int s_MoonDirID = Shader.PropertyToID("_MoonDirection");
         private static readonly int s_MoonColorID = Shader.PropertyToID("_MoonColor");
         private static readonly int s_MoonLightIntensityID = Shader.PropertyToID("_MoonLightIntensity");
@@ -337,10 +340,18 @@ namespace EAStudio.Core.RenderFeature.Sky
             m_GeneratorMaterial.SetVector(s_SunDirID, new Vector4(sunDir.x, sunDir.y, sunDir.z, 0f));
             m_GeneratorMaterial.SetColor(s_SunColorID, sunColor);
 
-            // Synchronize ground environment properties with clouds
+            // Synchronize physical sky dome and ground environment properties with clouds
             Color groundColor = proceduralSky != null ? proceduralSky.groundColor.value : new Color(0.369f, 0.349f, 0.341f, 1f);
             float groundFade = proceduralSky != null ? proceduralSky.groundFade.value : 0.25f;
             Color nightSkyColor = proceduralSky != null ? proceduralSky.nightSkyColor.value : new Color(0.02f, 0.03f, 0.06f, 1f);
+
+            // Dynamic physical Rayleigh skylight and sunset twilight matching ProceduralSky
+            Color skyTint = proceduralSky != null ? proceduralSky.skyTint.value : new Color(0.5f, 0.5f, 0.5f, 1f);
+            float thickness = proceduralSky != null ? proceduralSky.atmosphereThickness.value : 1.0f;
+            float lightingMultiplier = visualEnv != null ? visualEnv.lightingMultiplier.value : 1.0f;
+            float sunLum = Mathf.Max(sunColor.r, Mathf.Max(sunColor.g, sunColor.b));
+            Color dayZenith = skyTint * new Color(0.35f, 0.55f, 0.92f) * thickness * 1.4f * Mathf.Clamp01((sunDir.y + 0.25f) / 0.4f) * (sunLum * 0.8f + 0.2f);
+            Color sunsetTwilight = cloudSunTrans * new Color(1.0f, 0.55f, 0.22f) * 1.6f;
 
             // Moon properties for night cloud lighting
             Light moonLight = SkyEnvironmentSync.FindMoonLight();
@@ -370,6 +381,9 @@ namespace EAStudio.Core.RenderFeature.Sky
             m_GeneratorMaterial.SetColor(s_GroundColorID, groundColor);
             m_GeneratorMaterial.SetFloat(s_GroundFadeID, groundFade);
             m_GeneratorMaterial.SetColor(s_NightSkyColorID, nightSkyColor);
+            m_GeneratorMaterial.SetColor(s_AmbientSkyColorID, dayZenith * lightingMultiplier);
+            m_GeneratorMaterial.SetColor(s_AmbientSunsetColorID, sunsetTwilight * lightingMultiplier);
+            m_GeneratorMaterial.SetColor(s_ShadowColorID, cloudSettings.shadowColor.value);
             m_GeneratorMaterial.SetVector(s_MoonDirID, new Vector4(moonDir.x, moonDir.y, moonDir.z, 0f));
             m_GeneratorMaterial.SetColor(s_MoonColorID, moonColor);
             m_GeneratorMaterial.SetFloat(s_MoonLightIntensityID, moonIntensity);

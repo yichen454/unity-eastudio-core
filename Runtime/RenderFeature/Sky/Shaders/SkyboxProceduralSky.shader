@@ -386,9 +386,10 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 // Modulate by SkyTint
                 scattering *= _SkyTint.rgb * 2.0;
 
-                // --- Moon rendering and background composition ---
+                // --- Moon evaluation (Deep Space) ---
                 float4 moonData = CalcMoon(o_rayDir);
-                scattering = scattering * (1.0 - moonData.a) + moonData.rgb;
+                float3 moonFinal = moonData.rgb;
+                float moonMask = moonData.a;
 
                 // --- Crisp Sun Shape & Tight Coronal Halo (Deep Space) ---
                 float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);
@@ -402,18 +403,23 @@ Shader "Skybox/EAStudio/ProceduralSky"
                     float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
                     half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
-                    // Direct solar beam Beer-Lambert exponential extinction:
-                    // An HDR sun (50.0+) easily burns through linear (1 - A).
+                    // Direct celestial beam Beer-Lambert exponential extinction:
+                    // High dynamic range Sun (50+) and Moon (5+) easily burn through linear (1 - A).
                     // Exponential attenuation combined with smoothstep threshold completely extinguishes
-                    // the solid sun disc under overcast clouds (cloud.a >= 0.5), while allowing thin wisps (cloud.a < 0.2) to softly filter light.
-                    float sunDirectBeam = exp(-cloud.a * 16.0) * smoothstep(0.55, 0.15, cloud.a);
-                    sunFinal *= sunDirectBeam;
+                    // both the solid solar and lunar discs under overcast clouds (cloud.a >= 0.5),
+                    // while allowing thin wisps (cloud.a < 0.2) to softly filter light.
+                    float celestialDirectBeam = exp(-cloud.a * 16.0) * smoothstep(0.55, 0.15, cloud.a);
+                    sunFinal *= celestialDirectBeam;
+                    moonFinal *= celestialDirectBeam;
+                    moonMask *= celestialDirectBeam;
 
-                    // Deep sky background occlusion (sky Rayleigh/Mie atmosphere + Moon + Stars)
+                    // Deep sky background occlusion (sky Rayleigh/Mie atmosphere + Stars)
                     float cloudTransmittance = saturate(1.0 - cloud.a);
                     scattering = scattering * cloudTransmittance + cloud.rgb;
                 }
 
+                // Composite celestial bodies onto the sky
+                scattering = scattering * (1.0 - moonMask) + moonFinal;
                 scattering += sunFinal;
 
                 // Synchronize ground transition: ground smoothly covers sky, clouds, and sun below horizon!

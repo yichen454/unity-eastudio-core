@@ -55,6 +55,9 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 float4 _SunColor;
                 float4 _GroundColor;
                 float4 _NightSkyColor;
+                float4 _AmbientSkyColor;
+                float4 _AmbientSunsetColor;
+                float4 _ShadowColor;
                 float4 _MoonDirection;
                 float4 _MoonColor;
                 float _MoonLightIntensity;
@@ -259,18 +262,19 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 sunsetColor = lerp(sunsetColor, float3(0.95, 0.22, 0.06), smoothstep(0.05, -0.05, L.y));
                 float3 directSunLight = lerp(float3(1.0, 1.0, 1.0), sunsetColor, sunsetProgress) * sunDirectIntensity * _SunColor.rgb;
 
-                // 3. Ambient lighting transition (Daytime blue -> Sunset purple/rose -> Night dark sky)
+                // 3. Dynamic skylight & ambient lighting transition (driven by physical sky dome color & sunset reddening)
                 float daylightFactor = smoothstep(-0.18, 0.12, L.y);
                 float sunsetFactor = smoothstep(0.25, -0.02, L.y) * smoothstep(-0.15, 0.08, L.y);
 
-                float3 dayAmbient = float3(0.28, 0.35, 0.45);
-                float3 sunsetAmbient = float3(0.35, 0.22, 0.28);
+                float3 dayAmbient = _AmbientSkyColor.rgb;
+                float3 sunsetAmbient = _AmbientSunsetColor.rgb;
                 float3 nightAmbient = _NightSkyColor.rgb * 1.5 + float3(0.015, 0.02, 0.035);
 
-                // Ground bounce light adds earth tone near ground
+                // Ground bounce light adds earth tone on cloud undersides
                 float3 groundBounce = _GroundColor.rgb * (saturate(L.y * 1.5 + 0.2) * 0.35 + 0.05);
-                float3 ambientSky = lerp(nightAmbient, lerp(dayAmbient, sunsetAmbient, sunsetFactor), daylightFactor);
-                ambientSky = lerp(groundBounce, ambientSky, saturate(rayDir.y * 2.0));
+                float3 skyDomeLight = lerp(nightAmbient, lerp(dayAmbient, sunsetAmbient, sunsetFactor), daylightFactor);
+                float3 shadowMod = max(_ShadowColor.rgb, float3(0.05, 0.05, 0.05));
+                float3 ambientSky = lerp(groundBounce, skyDomeLight, saturate(rayDir.y * 1.8 + 0.1)) * shadowMod;
 
                 float timeVal = (_CloudWindTime > 0.0001) ? _CloudWindTime : _Time.y;
 
