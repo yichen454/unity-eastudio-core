@@ -42,6 +42,11 @@ EAStudio 核心基础库与通用工具包，提供 URP 自定义渲染特性、
   - **地形树转实体 GameObject (`TerrainTreeConverterWindow`)**：将 TerrainData 原生树批量实例化为独立 GameObject，并自动配置 Occludee Static。
 - **贴图 (`Tools/EAStudio/贴图/`)**：
   - **贴图编辑器 (`TextureEditorWindow`)**：基于 GPU Compute Shader 实现的极速贴图处理工具，支持 **RGBA 通道合并**（MaskMap 生成）与 **程序化多类型噪声图生成**（Perlin / Simplex / Worley / White / FBm / Turbulence）。
+- **着色器 (`Tools/EAStudio/Shader/`)**：
+  - **场景着色器分析器 (`SceneShaderAnalyzerWindow`)**：针对当前场景的全量 Shader、材质关键字与渲染变体分析工具。
+    - **全量扫描边界**：无缝扫描场景所有可见/未激活 `Renderer`（Mesh/SkinnedMesh/Particle/Trail/Line/Sprite）、`Terrain`、UI `Graphic`、场景后处理 `Volume` 以及环境天空盒（`RenderSettings.skybox`）。
+    - **真实场景变体与 Pass 估算**：废除无意义的笛卡尔积理论上限，基于场景材质实际启用的 Local/Global Keywords 组合与有效 Pass 数量，准确预估 GPU 驱动实际编译和加载的 Pass 变体总量。
+    - **影响变体的 Keywords 聚合分析**：精准识别导致变体分裂的关键关键字（`★ 是 (部分开启)`），统计影响的材质和渲染组件数量，并支持**一键全选场景中所有启用该 Keyword 的物体**以便快速排查和统一材质。
 
 ---
 
@@ -83,6 +88,7 @@ Packages/com.eastudio.core/
 ├── Editor/                         # 通用编辑器工具集 (EAStudio.Core.Editor)
 │   ├── Assets/                     # 资产修复与整理窗口
 │   ├── Lighting/                   # 光照贴图使用分析
+│   ├── Shader/                     # 场景 Shader 分析器与变体统计工具
 │   ├── Terrain/                    # 地形合并与地形树转换
 │   └── Texture/                    # 贴图编辑器与 Compute Shaders
 └── Runtime/                        # 运行时核心模块 (EAStudio.Core.Runtime)
