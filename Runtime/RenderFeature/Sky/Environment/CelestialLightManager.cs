@@ -40,10 +40,14 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         private static void RefreshLightCacheIfNeeded()
         {
+            // In editor mode (outside play mode), lights may be transformed or recolored interactively:
+            // scan aggressively so cloud responds instantly to inspector light manipulation!
+            bool isPlaying = Application.isPlaying;
             int currentFrame = Time.frameCount;
-            if (s_CachedSunLight != null &&
+
+            if (isPlaying && s_CachedSunLight != null &&
                 (s_CachedMoonLight == null || s_CachedMoonLight != s_CachedSunLight) &&
-                Mathf.Abs(currentFrame - s_LastLightScanFrame) < 60)
+                Mathf.Abs(currentFrame - s_LastLightScanFrame) < 30)
             {
                 return;
             }
@@ -52,22 +56,25 @@ namespace EAStudio.Core.RenderFeature.Sky
             s_CachedSunLight = null;
             s_CachedMoonLight = null;
 
-            // 1. If TimeOfDay controller is present, it explicitly owns celestial light bindings
-            // NEVER check isActiveAndEnabled to identify the celestial body: Sun is Sun even when sleeping at night!
+            // 1. TimeOfDay explicit bindings take top precedence
             if (TimeOfDay.Instance != null)
             {
                 if (TimeOfDay.Instance.sunLight != null)
-                {
                     s_CachedSunLight = TimeOfDay.Instance.sunLight;
-                }
                 if (TimeOfDay.Instance.moonLight != null && TimeOfDay.Instance.moonLight != s_CachedSunLight)
-                {
                     s_CachedMoonLight = TimeOfDay.Instance.moonLight;
-                }
-                return;
+
+                if (s_CachedSunLight != null)
+                    return;
             }
 
-            // 2. Scan scene lights by identity and name (exclude Moon from ever becoming Sun)
+            // 2. RenderSettings.sun has the highest native priority in Unity scenes
+            if (RenderSettings.sun != null && RenderSettings.sun.type == LightType.Directional)
+            {
+                s_CachedSunLight = RenderSettings.sun;
+            }
+
+            // 3. Scan scene lights by identity and naming heuristics
             var lights = Object.FindObjectsByType<Light>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             Light sunFallback = null;
             Light moonFallback = null;

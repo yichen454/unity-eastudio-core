@@ -397,30 +397,34 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float sunHorizonFade = saturate(1.0 - groundBlend * 2.0);
                 float3 sunFinal = sunRadiance * sunAttenuation * sunHorizonFade;
 
-                // --- Troposphere Cloud Deck Occlusion (covers Sun, Moon, and Deep Sky) ---
+                // --- Tropospheric Cloud Deck Occlusion & Celestial Extinction ---
                 if (_HasClouds > 0.5)
                 {
                     float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
                     half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
-                    // Direct celestial beam Beer-Lambert exponential extinction:
-                    // High dynamic range Sun (50+) and Moon (5+) easily burn through linear (1 - A).
-                    // Exponential attenuation combined with smoothstep threshold completely extinguishes
-                    // both the solid solar and lunar discs under overcast clouds (cloud.a >= 0.5),
-                    // while allowing thin wisps (cloud.a < 0.2) to softly filter light.
-                    float celestialDirectBeam = exp(-cloud.a * 16.0) * smoothstep(0.55, 0.15, cloud.a);
-                    sunFinal *= celestialDirectBeam;
-                    moonFinal *= celestialDirectBeam;
-                    moonMask *= celestialDirectBeam;
+                    // 1. Celestial beam extinction:
+                    // High dynamic range Sun (50-500+) burns through linear alpha unless strictly extinguished in dense cloud cores.
+                    // Under overcast/dense clouds (cloud.a >= 0.6), the solid solar disc is 100% completely extinguished.
+                    // Moon is gentler, softly penetrating medium clouds and only extinguished under deep overcast.
+                    float sunExtinction = exp(-cloud.a * 16.0) * smoothstep(0.60, 0.15, cloud.a);
+                    float moonExtinction = exp(-cloud.a * 5.0) * smoothstep(0.85, 0.30, cloud.a);
 
-                    // Deep sky background occlusion (sky Rayleigh/Mie atmosphere + Stars)
-                    float cloudTransmittance = saturate(1.0 - cloud.a);
-                    scattering = scattering * cloudTransmittance + cloud.rgb;
+                    sunFinal *= sunExtinction;
+                    moonFinal *= moonExtinction;
+                    moonMask *= moonExtinction;
+
+                    // 2. Composite background sky (atmosphere + extinguished celestial bodies)
+                    float3 backgroundSky = scattering * (1.0 - moonMask) + moonFinal + sunFinal;
+
+                    // 3. Clouds blend smoothly over deep sky background without dark edge halos
+                    scattering = lerp(backgroundSky, cloud.rgb, cloud.a);
                 }
-
-                // Composite celestial bodies onto the sky
-                scattering = scattering * (1.0 - moonMask) + moonFinal;
-                scattering += sunFinal;
+                else
+                {
+                    // No clouds: direct composition
+                    scattering = scattering * (1.0 - moonMask) + moonFinal + sunFinal;
+                }
 
                 // Synchronize ground transition: ground smoothly covers sky, clouds, and sun below horizon!
                 float3 groundBase = _GroundColor.rgb * (saturate(lightDir.y * 2.0 + 0.2) * 0.6 + 0.1);

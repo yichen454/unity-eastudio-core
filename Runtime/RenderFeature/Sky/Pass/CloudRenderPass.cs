@@ -27,6 +27,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         private int m_DownscaleFactor = 2;
         private bool m_CastShadows = false;
+        private bool m_EnableDepthBlending = true;
 
         public Texture ShadowCookieTexture => m_ShadowCookieRTHandle?.rt;
 
@@ -36,43 +37,28 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_CloudGlobalSunDirectionID = Shader.PropertyToID("_CloudGlobalSunDirection");
 
         // Textures
-        private static readonly int s_Cloud0TexID = Shader.PropertyToID("_Cloud_0_Tex");
-        private static readonly int s_Cloud0DetailTexID = Shader.PropertyToID("_Cloud_0_DetailTex");
-        private static readonly int s_Cloud1TexID = Shader.PropertyToID("_Cloud_1_Tex");
-        private static readonly int s_Cloud1DetailTexID = Shader.PropertyToID("_Cloud_1_DetailTex");
+        private static readonly int s_BaseTexID = Shader.PropertyToID("_BaseTex");
+        private static readonly int s_DetailTexID = Shader.PropertyToID("_DetailTex");
 
         // Cookie Shader Properties
-        private static readonly int s_BaseTexID = Shader.PropertyToID("_BaseTex");
         private static readonly int s_CloudWindOffsetID = Shader.PropertyToID("_CloudWindOffset");
         private static readonly int s_CoverageID = Shader.PropertyToID("_Coverage");
         private static readonly int s_RevInvCoverageID = Shader.PropertyToID("_RevInvCoverage");
         private static readonly int s_ShadowStrengthID = Shader.PropertyToID("_ShadowStrength");
         private static readonly int s_ScaleID = Shader.PropertyToID("_Scale");
 
-        // Layer 0 Properties
-        private static readonly int s_Cloud0SampleParamsID = Shader.PropertyToID("_Cloud_0_SampleParams");
-        private static readonly int s_Cloud0DetailParamsID = Shader.PropertyToID("_Cloud_0_DetailParams");
-        private static readonly int s_Cloud0SilverLiningParamsID = Shader.PropertyToID("_Cloud_0_SilverLiningParams");
-        private static readonly int s_Cloud0MaskParamsID = Shader.PropertyToID("_Cloud_0_MaskParams");
-        private static readonly int s_Cloud0LightingParamsID = Shader.PropertyToID("_Cloud_0_LightingParams");
-        private static readonly int s_Cloud0WindVectorID = Shader.PropertyToID("_Cloud_0_WindVector");
-        private static readonly int s_Cloud0LightmarchStepsID = Shader.PropertyToID("_Cloud_0_LightmarchSteps");
-        private static readonly int s_Cloud0ColorID = Shader.PropertyToID("_Cloud_0_Color");
-        private static readonly int s_Cloud0LightTransmittanceID = Shader.PropertyToID("_Cloud_0_LightTransmittance");
+        // Volumetric Raymarching Properties
+        private static readonly int s_CloudParams0ID = Shader.PropertyToID("_Cloud_Params0");
+        private static readonly int s_CloudParams1ID = Shader.PropertyToID("_Cloud_Params1");
+        private static readonly int s_CloudParams2ID = Shader.PropertyToID("_Cloud_Params2");
+        private static readonly int s_CloudLightingID = Shader.PropertyToID("_Cloud_Lighting");
+        private static readonly int s_CloudLighting2ID = Shader.PropertyToID("_Cloud_Lighting2");
+        private static readonly int s_CloudScatteringID = Shader.PropertyToID("_Cloud_Scattering");
+        private static readonly int s_CloudStepsID = Shader.PropertyToID("_Cloud_Steps");
+        private static readonly int s_CloudWindVectorID = Shader.PropertyToID("_Cloud_WindVector");
+        private static readonly int s_CloudColorID = Shader.PropertyToID("_Cloud_Color");
 
-        // Layer 1 Properties
-        private static readonly int s_Cloud1SampleParamsID = Shader.PropertyToID("_Cloud_1_SampleParams");
-        private static readonly int s_Cloud1DetailParamsID = Shader.PropertyToID("_Cloud_1_DetailParams");
-        private static readonly int s_Cloud1SilverLiningParamsID = Shader.PropertyToID("_Cloud_1_SilverLiningParams");
-        private static readonly int s_Cloud1MaskParamsID = Shader.PropertyToID("_Cloud_1_MaskParams");
-        private static readonly int s_Cloud1LightingParamsID = Shader.PropertyToID("_Cloud_1_LightingParams");
-        private static readonly int s_Cloud1WindVectorID = Shader.PropertyToID("_Cloud_1_WindVector");
-        private static readonly int s_Cloud1LightmarchStepsID = Shader.PropertyToID("_Cloud_1_LightmarchSteps");
-        private static readonly int s_Cloud1ColorID = Shader.PropertyToID("_Cloud_1_Color");
-        private static readonly int s_Cloud1LightTransmittanceID = Shader.PropertyToID("_Cloud_1_LightTransmittance");
-
-        // Common Lighting & Wind
-        private static readonly int s_ParallaxMainLightDirID = Shader.PropertyToID("_ParallaxTransitionedMainLightDir");
+        // Environment Lighting
         private static readonly int s_SunDirID = Shader.PropertyToID("_SunDirection");
         private static readonly int s_SunColorID = Shader.PropertyToID("_SunColor");
         private static readonly int s_GroundColorID = Shader.PropertyToID("_GroundColor");
@@ -92,6 +78,13 @@ namespace EAStudio.Core.RenderFeature.Sky
         public LowResPass LowRes => m_LowResPass;
         public RenderPassEvent RenderPassEvent => m_RenderPassEvent;
 
+        public void UpdateRenderPassEvent(RenderPassEvent renderPassEvent)
+        {
+            m_RenderPassEvent = renderPassEvent;
+            if (m_LowResPass != null)
+                m_LowResPass.renderPassEvent = renderPassEvent;
+        }
+
         private Shader m_GeneratorShaderOverride;
         private Shader m_CookieShaderOverride;
 
@@ -105,23 +98,20 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         public void SetShaderOverrides(Shader generatorShader, Shader cookieShader)
         {
-            if (generatorShader != null && m_GeneratorShaderOverride != generatorShader)
+            if (m_GeneratorShaderOverride != generatorShader)
             {
                 m_GeneratorShaderOverride = generatorShader;
-                if (m_GeneratorMaterial != null && m_GeneratorMaterial.shader != generatorShader)
-                {
-                    CoreUtils.Destroy(m_GeneratorMaterial);
-                    m_GeneratorMaterial = null;
-                }
+                CoreUtils.Destroy(m_GeneratorMaterial);
+                m_GeneratorMaterial = null;
+                m_GeneratorShader = null;
             }
-            if (cookieShader != null && m_CookieShaderOverride != cookieShader)
+
+            if (m_CookieShaderOverride != cookieShader)
             {
                 m_CookieShaderOverride = cookieShader;
-                if (m_CookieMaterial != null && m_CookieMaterial.shader != cookieShader)
-                {
-                    CoreUtils.Destroy(m_CookieMaterial);
-                    m_CookieMaterial = null;
-                }
+                CoreUtils.Destroy(m_CookieMaterial);
+                m_CookieMaterial = null;
+                m_CookieShader = null;
             }
         }
 
@@ -130,11 +120,15 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (m_GeneratorMaterial != null)
                 return true;
 
-            m_GeneratorShader = m_GeneratorShaderOverride != null ? m_GeneratorShaderOverride : Shader.Find(k_GeneratorShader);
+            Shader s = m_GeneratorShaderOverride != null ? m_GeneratorShaderOverride : Shader.Find(k_GeneratorShader);
+            if (s == null)
+            {
+                Debug.LogError($"[CloudRenderPass] Cannot find shader: {k_GeneratorShader}");
+                return false;
+            }
 
-            if (m_GeneratorShader != null)
-                m_GeneratorMaterial = CoreUtils.CreateEngineMaterial(m_GeneratorShader);
-
+            m_GeneratorShader = s;
+            m_GeneratorMaterial = CoreUtils.CreateEngineMaterial(m_GeneratorShader);
             return m_GeneratorMaterial != null;
         }
 
@@ -143,44 +137,37 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (m_CookieMaterial != null)
                 return true;
 
-            m_CookieShader = m_CookieShaderOverride != null ? m_CookieShaderOverride : Shader.Find(k_CookieShader);
+            Shader s = m_CookieShaderOverride != null ? m_CookieShaderOverride : Shader.Find(k_CookieShader);
+            if (s == null)
+                return false;
 
-            if (m_CookieShader != null)
-                m_CookieMaterial = CoreUtils.CreateEngineMaterial(m_CookieShader);
-
+            m_CookieShader = s;
+            m_CookieMaterial = CoreUtils.CreateEngineMaterial(m_CookieShader);
             return m_CookieMaterial != null;
         }
 
         private void EnsureShadowCookieRTHandle()
         {
-            if (m_ShadowCookieRTHandle == null)
-            {
-                m_ShadowCookieRTHandle = RTHandles.Alloc(
-                    512, 512,
-                    colorFormat: GraphicsFormat.R8_UNorm,
-                    filterMode: FilterMode.Bilinear,
-                    wrapMode: TextureWrapMode.Repeat,
-                    name: "CloudShadow_Cookie"
-                );
-            }
-        }
+            if (m_ShadowCookieRTHandle != null)
+                return;
 
-        private static Texture2D LoadTexture(string resourceName)
-        {
-            Texture2D tex = Resources.Load<Texture2D>($"EAStudio/Sky/{resourceName}");
-#if UNITY_EDITOR
-            if (tex == null)
+            RenderTextureDescriptor desc = new RenderTextureDescriptor(512, 512, RenderTextureFormat.R8, 0)
             {
-                tex = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(
-                    $"Packages/com.eastudio.core/Runtime/RenderFeature/Sky/Resources/EAStudio/Sky/{resourceName}.png");
-            }
-            if (tex == null)
-            {
-                tex = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(
-                    $"Packages/unity-eastudio-core/Runtime/RenderFeature/Sky/Resources/EAStudio/Sky/{resourceName}.png");
-            }
-#endif
-            return tex;
+                msaaSamples = 1,
+                sRGB = false,
+                useMipMap = false,
+                autoGenerateMips = false
+            };
+
+            m_ShadowCookieRTHandle = RTHandles.Alloc(
+                desc,
+                FilterMode.Bilinear,
+                TextureWrapMode.Repeat,
+                isShadowMap: false,
+                anisoLevel: 1,
+                mipMapBias: 0f,
+                name: "_CloudShadowCookieRT"
+            );
         }
 
         private static Texture2D GetBaseTexture(CloudNoiseType type)
@@ -188,20 +175,19 @@ namespace EAStudio.Core.RenderFeature.Sky
             switch (type)
             {
                 case CloudNoiseType.Worley:
-                    if (s_WorleyTex == null) s_WorleyTex = LoadTexture("CloudNoise_Worley");
+                    if (s_WorleyTex == null) s_WorleyTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Worley");
                     return s_WorleyTex;
                 case CloudNoiseType.Billow:
-                    if (s_BillowTex == null) s_BillowTex = LoadTexture("CloudNoise_Billow");
+                    if (s_BillowTex == null) s_BillowTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Billow");
                     return s_BillowTex;
                 case CloudNoiseType.Perlin:
-                case CloudNoiseType.Value:
-                    if (s_PerlinTex == null) s_PerlinTex = LoadTexture("CloudNoise_Perlin");
+                    if (s_PerlinTex == null) s_PerlinTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Perlin");
                     return s_PerlinTex;
                 case CloudNoiseType.Stratocumulus:
-                    if (s_StratocumulusTex == null) s_StratocumulusTex = LoadTexture("CloudNoise_Stratocumulus");
+                    if (s_StratocumulusTex == null) s_StratocumulusTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Stratocumulus");
                     return s_StratocumulusTex;
                 default:
-                    if (s_WorleyTex == null) s_WorleyTex = LoadTexture("CloudNoise_Worley");
+                    if (s_WorleyTex == null) s_WorleyTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Worley");
                     return s_WorleyTex;
             }
         }
@@ -211,13 +197,13 @@ namespace EAStudio.Core.RenderFeature.Sky
             switch (type)
             {
                 case CloudDetailType.Worley:
-                    if (s_WorleyDetailTex == null) s_WorleyDetailTex = LoadTexture("CloudNoise_Detail_Worley");
+                    if (s_WorleyDetailTex == null) s_WorleyDetailTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Detail_Worley");
                     return s_WorleyDetailTex;
                 case CloudDetailType.Perlin:
-                    if (s_PerlinDetailTex == null) s_PerlinDetailTex = LoadTexture("CloudNoise_Detail_Perlin");
+                    if (s_PerlinDetailTex == null) s_PerlinDetailTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Detail_Perlin");
                     return s_PerlinDetailTex;
                 default:
-                    if (s_WorleyDetailTex == null) s_WorleyDetailTex = LoadTexture("CloudNoise_Detail_Worley");
+                    if (s_WorleyDetailTex == null) s_WorleyDetailTex = Resources.Load<Texture2D>("EAStudio/Sky/CloudNoise_Detail_Worley");
                     return s_WorleyDetailTex;
             }
         }
@@ -228,23 +214,14 @@ namespace EAStudio.Core.RenderFeature.Sky
                 return;
 
             m_CastShadows = castShadows;
+            m_EnableDepthBlending = cloudSettings.enableDepthBlending.value;
 
             // Downscale factor
             m_DownscaleFactor = Mathf.Max(1, (int)cloudSettings.downscale.value);
 
-            // Layer 1 - Active evaluation & forced 0 coverage when disabled
-            bool active1 = cloudSettings.enableLayer1.value && cloudSettings.coverage.value > 0.001f;
-            float cov1 = active1 ? cloudSettings.coverage.value : 0.0f;
-            float revInvCov1 = cov1 > 0.001f ? (1.0f / cov1) : 0.0f;
-            float scale1 = cloudSettings.scale.value * 0.15f;
-            float altitude1 = cloudSettings.altitude.value;
-            float curvature = cloudSettings.curvature.value;
-
-            // Layer 2 - Active evaluation & forced 0 coverage when disabled
-            bool active2 = cloudSettings.enableLayer2.value && cloudSettings.layer2Coverage.value > 0.001f;
-            float cov2 = active2 ? cloudSettings.layer2Coverage.value : 0.0f;
-            float revInvCov2 = cov2 > 0.001f ? (1.0f / cov2) : 0.0f;
-            float scale2 = cloudSettings.layer2Scale.value * 0.25f;
+            bool cloudsActive = cloudSettings.enableClouds.value && cloudSettings.coverage.value > 0.001f;
+            float coverage = cloudsActive ? cloudSettings.coverage.value : 0.0f;
+            float revInvCov = coverage > 0.001f ? (1.0f / coverage) : 0.0f;
 
             // Time & Wind
             float windOrientation = visualEnv.windOrientation.value;
@@ -258,102 +235,62 @@ namespace EAStudio.Core.RenderFeature.Sky
             float currentTime = Time.time;
 #endif
 
-            // Sunlight & Direction
+            // Sunlight & Direction (Normalized chromaticity to prevent HDR blowout)
             Vector3 sunDir = sunLight != null ? -sunLight.transform.forward : new Vector3(0f, 0.7071f, 0.7071f);
-            Color sunColor = (sunLight != null && sunLight.isActiveAndEnabled) ? (sunLight.color * sunLight.intensity) : Color.black;
+            Color sunColorRaw = (sunLight != null && sunLight.isActiveAndEnabled)
+                ? (sunLight.color * sunLight.intensity) : Color.black;
+            float sunColorMax = Mathf.Max(sunColorRaw.r, Mathf.Max(sunColorRaw.g, sunColorRaw.b));
+            Color sunColor = sunColorMax > 0.001f
+                ? new Color(sunColorRaw.r / sunColorMax, sunColorRaw.g / sunColorMax, sunColorRaw.b / sunColorMax, 1f)
+                : Color.black;
 
-            float thicknessVal = proceduralSky != null ? proceduralSky.atmosphereThickness.value : 1.0f;
+            // Resolve Textures
+            Texture baseTex = cloudSettings.customBaseTexture.value != null ? cloudSettings.customBaseTexture.value : (Texture)GetBaseTexture(cloudSettings.shapeType.value);
+            Texture detailTex = cloudSettings.customDetailTexture.value != null ? cloudSettings.customDetailTexture.value : (Texture)GetDetailTexture(cloudSettings.detailType.value);
+            m_GeneratorMaterial.SetTexture(s_BaseTexID, baseTex != null ? baseTex : Texture2D.whiteTexture);
+            m_GeneratorMaterial.SetTexture(s_DetailTexID, detailTex != null ? detailTex : Texture2D.whiteTexture);
 
-            // Fast Sky 2 exact cloud light transmittance with PurifyColor
-            float orgLightY = sunDir.y;
-            float adjLightY = Mathf.Max(sunDir.y, 0.01f);
-            float tSunset = Mathf.Clamp01((0.05f - orgLightY) / 0.20f);
-            float nightFac = Mathf.Clamp01((0.1f - orgLightY) / 0.20f);
-            float darkenFactor = Mathf.Lerp(1.0f, 0.45f, nightFac);
+            // Shape & Position Properties
+            float earthRadius = 6371000f;
+            float altitude = cloudSettings.altitude.value;
+            float thickness = cloudSettings.thickness.value;
 
-            float lightExt = Mathf.Exp(-(Mathf.Clamp01(adjLightY + 0.05f) * 40.0f)) +
-                             Mathf.Exp(-(Mathf.Clamp01(adjLightY + 0.5f) * 5.0f)) * 0.4f +
-                             Mathf.Pow(Mathf.Clamp01(1.0f - adjLightY), 2.0f) * 0.02f + 0.002f;
-            lightExt = Mathf.Clamp01(lightExt);
-            Vector3 ext = new Vector3(5.802e-6f, 13.558e-6f, 33.100e-6f) * (lightExt * 1e6f * 1.5f);
-            Color rawTrans = new Color(Mathf.Exp(-ext.x), Mathf.Exp(-ext.y), Mathf.Exp(-ext.z), 1.0f) * sunColor;
+            m_GeneratorMaterial.SetVector(s_CloudParams0ID, new Vector4(cloudSettings.scale.value, coverage, cloudSettings.density.value, cloudSettings.cloudType.value));
+            m_GeneratorMaterial.SetVector(s_CloudParams1ID, new Vector4(cloudSettings.detailScale.value, cloudSettings.detailErosion.value, cloudSettings.bottomRoundness.value, cloudSettings.topSoftness.value));
+            m_GeneratorMaterial.SetVector(s_CloudParams2ID, new Vector4(altitude, thickness, earthRadius, cloudSettings.horizonFade.value));
 
-            float maxComp = Mathf.Max(Mathf.Max(rawTrans.r, rawTrans.g), rawTrans.b);
-            if (maxComp > 0.0001f)
-            {
-                rawTrans.r /= maxComp;
-                rawTrans.g /= maxComp;
-                rawTrans.b /= maxComp;
-            }
-            Color cloudSunTrans = Color.Lerp(rawTrans, Color.white, tSunset);
-            Color finalCloudColor = cloudSettings.cloudColor.value * darkenFactor;
+            // Lighting & Multi-Scattering Properties
+            float scaledAbsorption = cloudSettings.absorption.value * 0.0022f;
+            m_GeneratorMaterial.SetVector(s_CloudLightingID, new Vector4(scaledAbsorption, cloudSettings.selfShadowStrength.value, cloudSettings.powderEffect.value, cloudSettings.sunLightIntensity.value));
+            m_GeneratorMaterial.SetVector(s_CloudLighting2ID, new Vector4(cloudSettings.silverLiningIntensity.value, cloudSettings.silverLiningSpread.value, cloudSettings.backlitStrength.value, cloudSettings.ambientFloor.value));
+            m_GeneratorMaterial.SetVector(s_CloudScatteringID, new Vector4(cloudSettings.multiScattering.value, cloudSettings.multiScatterFalloff.value, cloudSettings.horizonFadeStart.value, 0f));
 
-            // 1. Resolve Pre-baked or Custom Textures
-            Texture tex0 = cloudSettings.customBaseTexture.value != null ? cloudSettings.customBaseTexture.value : (Texture)GetBaseTexture(cloudSettings.shapeType.value);
-            Texture detailTex0 = cloudSettings.customDetailTexture.value != null ? cloudSettings.customDetailTexture.value : (Texture)GetDetailTexture(cloudSettings.detailType.value);
-            m_GeneratorMaterial.SetTexture(s_Cloud0TexID, tex0 != null ? tex0 : Texture2D.blackTexture);
-            m_GeneratorMaterial.SetTexture(s_Cloud0DetailTexID, detailTex0 != null ? detailTex0 : Texture2D.whiteTexture);
+            // Steps & Performance
+            float minSteps = cloudSettings.minSteps.value;
+            float maxSteps = cloudSettings.maxSteps.value;
+            float lightmarchSteps = cloudSettings.lightmarchSteps.value;
+            float skipping = cloudSettings.enableEmptySpaceSkipping.value ? 1f : 0f;
+            m_GeneratorMaterial.SetVector(s_CloudStepsID, new Vector4(minSteps, maxSteps, lightmarchSteps, skipping));
 
-            Texture tex1 = cloudSettings.layer2CustomBaseTexture.value != null ? cloudSettings.layer2CustomBaseTexture.value : (Texture)GetBaseTexture(cloudSettings.layer2ShapeType.value);
-            Texture detailTex1 = cloudSettings.layer2CustomDetailTexture.value != null ? cloudSettings.layer2CustomDetailTexture.value : (Texture)GetDetailTexture(cloudSettings.layer2DetailType.value);
-            m_GeneratorMaterial.SetTexture(s_Cloud1TexID, tex1 != null ? tex1 : Texture2D.blackTexture);
-            m_GeneratorMaterial.SetTexture(s_Cloud1DetailTexID, detailTex1 != null ? detailTex1 : Texture2D.whiteTexture);
+            // Wind Offset
+            Vector2 windOffset = windDir * (windSpeed * currentTime * 0.00008f);
+            m_GeneratorMaterial.SetVector(s_CloudWindVectorID, new Vector4(windOffset.x, windOffset.y, 1.5f, 0f));
+            m_GeneratorMaterial.SetColor(s_CloudColorID, cloudSettings.cloudColor.value);
 
-            // Horizon and Zenith Masks
-            float horizonFade = Mathf.Clamp(cloudSettings.horizonFade.value, 0.02f, 0.5f);
-            Vector4 maskParams = new Vector4(1.0f / horizonFade, 0.1f, 0f, 0f);
-
-            float thickness0 = Mathf.Clamp(cloudSettings.thickness.value, 0.1f, 50.0f) * 0.003f;
-            float thickness1 = Mathf.Clamp(cloudSettings.layer2Thickness.value, 0.1f, 50.0f) * 0.003f;
-            float absorption0 = Mathf.Clamp(cloudSettings.absorption.value, 0.1f, 5.0f);
-            float absorption1 = Mathf.Clamp(cloudSettings.layer2Absorption.value, 0.1f, 5.0f);
-
-            // 2. Configure Layer 0 Material Properties
-            m_GeneratorMaterial.SetVector(s_Cloud0SampleParamsID, new Vector4(scale1, curvature * 0.5f, 1.0f - cov1, revInvCov1));
-            m_GeneratorMaterial.SetVector(s_Cloud0DetailParamsID, new Vector4(cloudSettings.detailScale.value, cloudSettings.detailErosion.value, 0f, 0f));
-            m_GeneratorMaterial.SetVector(s_Cloud0SilverLiningParamsID, new Vector4(cloudSettings.silverLiningWidth.value, cloudSettings.silverLining.value, 0f, 0f));
-            m_GeneratorMaterial.SetVector(s_Cloud0MaskParamsID, maskParams);
-            m_GeneratorMaterial.SetVector(s_Cloud0LightingParamsID, new Vector4(cloudSettings.density.value * 4.0f, absorption0, 0.38f, thickness0));
-            Vector2 windVec0 = windDir * (windSpeed * 0.005f);
-            m_GeneratorMaterial.SetVector(s_Cloud0WindVectorID, new Vector4(windVec0.x, windVec0.y, 0f, -3f));
-            int steps = cloudSettings.lightmarchSteps.value;
-            m_GeneratorMaterial.SetVector(s_Cloud0LightmarchStepsID, new Vector4(steps, 1.0f / steps, 0f, 0f));
-            m_GeneratorMaterial.SetColor(s_Cloud0ColorID, finalCloudColor);
-            m_GeneratorMaterial.SetColor(s_Cloud0LightTransmittanceID, cloudSunTrans);
-
-            // 3. Configure Layer 1 Material Properties
-            m_GeneratorMaterial.SetVector(s_Cloud1SampleParamsID, new Vector4(scale2, curvature * 0.5f, 1.0f - cov2, revInvCov2));
-            m_GeneratorMaterial.SetVector(s_Cloud1DetailParamsID, new Vector4(cloudSettings.detailScale.value * 1.5f, cloudSettings.detailErosion.value, 0f, 0f));
-            m_GeneratorMaterial.SetVector(s_Cloud1SilverLiningParamsID, new Vector4(cloudSettings.silverLiningWidth.value, cloudSettings.silverLining.value * 0.6f, 0f, 0f));
-            m_GeneratorMaterial.SetVector(s_Cloud1MaskParamsID, maskParams);
-            m_GeneratorMaterial.SetVector(s_Cloud1LightingParamsID, new Vector4(cloudSettings.layer2Density.value * 3.0f, absorption1, 0.38f, thickness1));
-            Vector2 windVec1 = windDir * (windSpeed * cloudSettings.layer2SpeedMultiplier.value * 0.005f);
-            m_GeneratorMaterial.SetVector(s_Cloud1WindVectorID, new Vector4(windVec1.x, windVec1.y, 0f, -3f));
-            m_GeneratorMaterial.SetVector(s_Cloud1LightmarchStepsID, new Vector4(steps, 1.0f / steps, 0f, 0f));
-            m_GeneratorMaterial.SetColor(s_Cloud1ColorID, finalCloudColor);
-            m_GeneratorMaterial.SetColor(s_Cloud1LightTransmittanceID, cloudSunTrans);
-
-            // 4. Parallax Light Direction & Time
-            float pFac = 1.0f / Mathf.Max(0.1f, sunDir.y);
-            Vector2 parallaxTrsMainLightDir = new Vector2(sunDir.x * pFac, sunDir.z * pFac);
-            m_GeneratorMaterial.SetVector(s_ParallaxMainLightDirID, new Vector4(parallaxTrsMainLightDir.x, parallaxTrsMainLightDir.y, 0f, 0f));
+            // Celestial Lighting
             m_GeneratorMaterial.SetVector(s_SunDirID, new Vector4(sunDir.x, sunDir.y, sunDir.z, 0f));
             m_GeneratorMaterial.SetColor(s_SunColorID, sunColor);
 
-            // Synchronize physical sky dome and ground environment properties with clouds
             Color groundColor = proceduralSky != null ? proceduralSky.groundColor.value : new Color(0.369f, 0.349f, 0.341f, 1f);
             float groundFade = proceduralSky != null ? proceduralSky.groundFade.value : 0.25f;
             Color nightSkyColor = proceduralSky != null ? proceduralSky.nightSkyColor.value : new Color(0.02f, 0.03f, 0.06f, 1f);
 
-            // Dynamic physical Rayleigh skylight and sunset twilight matching ProceduralSky
             Color skyTint = proceduralSky != null ? proceduralSky.skyTint.value : new Color(0.5f, 0.5f, 0.5f, 1f);
-            float thickness = proceduralSky != null ? proceduralSky.atmosphereThickness.value : 1.0f;
+            float skyThickness = proceduralSky != null ? proceduralSky.atmosphereThickness.value : 1.0f;
             float lightingMultiplier = visualEnv != null ? visualEnv.lightingMultiplier.value : 1.0f;
-            float sunLum = Mathf.Max(sunColor.r, Mathf.Max(sunColor.g, sunColor.b));
-            Color dayZenith = skyTint * new Color(0.35f, 0.55f, 0.92f) * thickness * 1.4f * Mathf.Clamp01((sunDir.y + 0.25f) / 0.4f) * (sunLum * 0.8f + 0.2f);
-            Color sunsetTwilight = cloudSunTrans * new Color(1.0f, 0.55f, 0.22f) * 1.6f;
+            Color dayZenith = skyTint * new Color(0.35f, 0.55f, 0.92f) * skyThickness * 1.4f * Mathf.Clamp01((sunDir.y + 0.25f) / 0.4f);
+            Color sunsetTwilight = sunColor * new Color(1.0f, 0.55f, 0.22f) * 1.6f;
 
-            // Moon properties for night cloud lighting
             Light moonLight = SkyEnvironmentSync.FindMoonLight();
             if (moonLight == sunLight)
                 moonLight = null;
@@ -375,8 +312,10 @@ namespace EAStudio.Core.RenderFeature.Sky
             Color baseMoonColor = moonSettings != null ? moonSettings.moonColor.value : new Color(0.92f, 0.95f, 1.0f, 1.0f);
             Color moonLightColor = (moonLight != null && moonLight.isActiveAndEnabled) ? (moonLight.color * moonLight.intensity) : (Color.white * 0.25f);
             Color moonColor = baseMoonColor * moonLightColor;
-            float moonIntensity = (moonSettings == null || moonSettings.enableMoon.value) ?
+            float nightFactor = Mathf.Clamp01((0.05f - sunDir.y) / 0.15f);
+            float baseMoonIntensity = (moonSettings == null || moonSettings.enableMoon.value) ?
                 (moonSettings != null ? moonSettings.cloudMoonlightIntensity.value : 0.7f) : 0.0f;
+            float moonIntensity = baseMoonIntensity * nightFactor;
 
             m_GeneratorMaterial.SetColor(s_GroundColorID, groundColor);
             m_GeneratorMaterial.SetFloat(s_GroundFadeID, groundFade);
@@ -389,21 +328,20 @@ namespace EAStudio.Core.RenderFeature.Sky
             m_GeneratorMaterial.SetFloat(s_MoonLightIntensityID, moonIntensity);
             m_GeneratorMaterial.SetFloat(s_WindTimeID, currentTime);
 
-            // 5. Global Properties for Ground Shadows & God Rays
-            Vector2 windOffset = windDir * (windSpeed * currentTime * 0.005f);
-            float shadowStrength = (active1 || active2) ? cloudSettings.shadowStrength.value : 0.0f;
-            Shader.SetGlobalVector(s_CloudShadowParamsID, new Vector4(altitude1, cloudSettings.scale.value, shadowStrength, (active1 || active2) ? 1f : 0f));
+            // Global Properties for Ground Shadows
+            float shadowStrength = cloudsActive ? cloudSettings.shadowStrength.value : 0.0f;
+            Shader.SetGlobalVector(s_CloudShadowParamsID, new Vector4(altitude, cloudSettings.scale.value, shadowStrength, cloudsActive ? 1f : 0f));
             Shader.SetGlobalVector(s_CloudGlobalWindOffsetID, new Vector4(windOffset.x, windOffset.y, 0f, 0f));
             Shader.SetGlobalVector(s_CloudGlobalSunDirectionID, new Vector4(sunDir.x, sunDir.y, sunDir.z, 0f));
 
-            // 6. Setup Directional Light Cookie Material
+            // Setup Directional Light Cookie Material
             if (m_CastShadows && EnsureCookieMaterial())
             {
                 EnsureShadowCookieRTHandle();
-                m_CookieMaterial.SetTexture(s_BaseTexID, tex0 != null ? tex0 : Texture2D.whiteTexture);
+                m_CookieMaterial.SetTexture(s_BaseTexID, baseTex != null ? baseTex : Texture2D.whiteTexture);
                 m_CookieMaterial.SetVector(s_CloudWindOffsetID, new Vector4(windOffset.x, windOffset.y, 0f, 0f));
-                m_CookieMaterial.SetFloat(s_CoverageID, 1.0f - cov1);
-                m_CookieMaterial.SetFloat(s_RevInvCoverageID, revInvCov1);
+                m_CookieMaterial.SetFloat(s_CoverageID, 1.0f - coverage);
+                m_CookieMaterial.SetFloat(s_RevInvCoverageID, revInvCov);
                 m_CookieMaterial.SetFloat(s_ShadowStrengthID, shadowStrength);
                 m_CookieMaterial.SetFloat(s_ScaleID, Mathf.Max(0.1f, cloudSettings.scale.value * 1.5f));
             }
@@ -455,6 +393,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                     return;
 
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+                UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
 
                 int factor = m_Parent.m_DownscaleFactor;
@@ -479,11 +418,17 @@ namespace EAStudio.Core.RenderFeature.Sky
                 cloudFrameData.cloudTexture = cloudTex;
                 cloudFrameData.hasClouds = true;
 
-                // Pass 1: Render low-res sky cloud map
-                using (var builder = renderGraph.AddRasterRenderPass<PassData>("Generate Low-Res Clouds", out var passData))
+                // Pass 1: Render volumetric clouds
+                using (var builder = renderGraph.AddRasterRenderPass<PassData>("Generate Volumetric Clouds", out var passData))
                 {
                     passData.material = m_Parent.m_GeneratorMaterial;
                     passData.cloudTexture = cloudTex;
+
+                    // Declare read dependency on depth texture for depth blending
+                    if (m_Parent.m_EnableDepthBlending && resourceData != null && resourceData.cameraDepthTexture.IsValid())
+                    {
+                        builder.UseTexture(resourceData.cameraDepthTexture, AccessFlags.Read);
+                    }
 
                     builder.SetRenderAttachment(cloudTex, 0, AccessFlags.Write);
                     builder.SetGlobalTextureAfterPass(cloudTex, s_CloudTextureID);

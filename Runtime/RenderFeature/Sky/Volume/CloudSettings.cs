@@ -47,105 +47,113 @@ namespace EAStudio.Core.RenderFeature.Sky
     [Serializable, VolumeComponentMenu("Sky/Cloud Settings")]
     public class CloudSettings : VolumeComponent
     {
-        [Header("第一层云 - 低空积云 (Layer 1 - Cumulus)")]
-        [Tooltip("是否启用第一层主云层。")]
-        public BoolParameter enableLayer1 = new BoolParameter(true);
+        [Header("形态与覆盖 (Shape & Coverage)")]
+        [Tooltip("是否启用体积云渲染。")]
+        public BoolParameter enableClouds = new BoolParameter(true);
 
-        [Tooltip("第一层基础形态预制噪声类型：Worley(细胞积云，团状饱满)、Billow(翻滚浓积云)、Perlin(平滑卷云)、Value(平滑噪声)、Stratocumulus(起伏层积云)。")]
+        [Tooltip("云层基础形态预制噪声：Worley(积云)、Billow(浓积云)、Perlin(卷云)、Stratocumulus(层积云)。")]
         public CloudNoiseTypeParameter shapeType = new CloudNoiseTypeParameter(CloudNoiseType.Worley);
 
-        [Tooltip("第一层边缘侵蚀高频细节噪声类型：Worley(蜂窝细胞边缘)、Perlin(扭曲撕裂絮状边缘)。")]
+        [Tooltip("边缘侵蚀细节噪声类型。")]
         public CloudDetailTypeParameter detailType = new CloudDetailTypeParameter(CloudDetailType.Worley);
 
-        [Tooltip("可选自定义第一层基础形状噪声贴图。")]
+        [Tooltip("可选自定义基础形状贴图。")]
         public TextureParameter customBaseTexture = new TextureParameter(null);
 
-        [Tooltip("可选自定义第一层高频侵蚀细节贴图。")]
+        [Tooltip("可选自定义高频细节贴图。")]
         public TextureParameter customDetailTexture = new TextureParameter(null);
 
-        [Tooltip("第一层云层覆盖度（0 = 晴空万里，1 = 密布阴天）。")]
+        [Tooltip("全局云层覆盖度（0 = 晴空万里，1 = 密布阴天）。")]
         public ClampedFloatParameter coverage = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
 
-        [Tooltip("第一层云层不透明度 / 密度倍率。")]
-        public ClampedFloatParameter density = new ClampedFloatParameter(1.0f, 0.0f, 3.0f);
+        [Tooltip("云层物理密度倍率（控制云体实体浓度与遮光能力）。")]
+        public ClampedFloatParameter density = new ClampedFloatParameter(1.0f, 0.1f, 5.0f);
 
-        [Tooltip("第一层光线步进体积厚度（0 = 平面薄云，数值越大 3D 团块感越深厚）。")]
-        public ClampedFloatParameter thickness = new ClampedFloatParameter(15.0f, 0.0f, 50.0f);
+        [Tooltip("云层宏观世界平铺缩放。")]
+        public MinFloatParameter scale = new MinFloatParameter(1.0f, 0.05f);
 
-        [Tooltip("比尔-朗伯吸收系数（控制云层底部和内部自阴影的深浅与立体感）。")]
-        public ClampedFloatParameter absorption = new ClampedFloatParameter(1.5f, 0.0f, 5.0f);
-
-        [Tooltip("第一层云层宏观平铺缩放比例。")]
-        public MinFloatParameter scale = new MinFloatParameter(1.0f, 0.1f);
-
-        [Tooltip("第一层云层海拔高度（米），用于阴影投影与视差计算。")]
+        [Tooltip("云底起始海拔高度（米）。")]
         public MinFloatParameter altitude = new MinFloatParameter(2000f, 100f);
 
-        [Header("第二层云 - 高空卷云 (Layer 2 - Cirrus)")]
-        [Tooltip("是否启用第二层高空云。")]
-        public BoolParameter enableLayer2 = new BoolParameter(false);
+        [Tooltip("云体物理垂直厚度（米，控制从云底到云顶的真实物理厚度，数值越大立体团块感越深厚）。")]
+        public ClampedFloatParameter thickness = new ClampedFloatParameter(2500f, 100f, 8000f);
 
-        [Tooltip("第二层基础形态预制噪声类型。")]
-        public CloudNoiseTypeParameter layer2ShapeType = new CloudNoiseTypeParameter(CloudNoiseType.Perlin);
+        [Tooltip("云型插值（0 = Stratus 扁平层云，1 = Cumulus 蓬松积云塔）。")]
+        public ClampedFloatParameter cloudType = new ClampedFloatParameter(0.85f, 0.0f, 1.0f);
 
-        [Tooltip("第二层边缘侵蚀高频细节噪声类型。")]
-        public CloudDetailTypeParameter layer2DetailType = new CloudDetailTypeParameter(CloudDetailType.Perlin);
+        [Tooltip("高频细节侵蚀强度（数值越大边缘撕裂絮状感越明显）。")]
+        public ClampedFloatParameter detailErosion = new ClampedFloatParameter(0.45f, 0.0f, 1.0f);
 
-        [Tooltip("可选自定义第二层基础形状贴图。")]
-        public TextureParameter layer2CustomBaseTexture = new TextureParameter(null);
+        [Tooltip("高频侵蚀细节缩放倍率。")]
+        public ClampedFloatParameter detailScale = new ClampedFloatParameter(4.0f, 1.0f, 16.0f);
 
-        [Tooltip("可选自定义第二层细节侵蚀贴图。")]
-        public TextureParameter layer2CustomDetailTexture = new TextureParameter(null);
+        [Tooltip("云底平整圆润度（数值越大底部过渡越平实自然）。")]
+        public ClampedFloatParameter bottomRoundness = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
 
-        [Tooltip("第二层云层覆盖度（0 = 晴空万里，1 = 密布阴天）。")]
-        public ClampedFloatParameter layer2Coverage = new ClampedFloatParameter(0.4f, 0.0f, 1.0f);
+        [Tooltip("云顶柔软消散度（数值越大云顶过渡越蓬松散漫）。")]
+        public ClampedFloatParameter topSoftness = new ClampedFloatParameter(0.3f, 0.05f, 0.8f);
 
-        [Tooltip("第二层云层不透明度 / 密度倍率。")]
-        public ClampedFloatParameter layer2Density = new ClampedFloatParameter(0.5f, 0.0f, 2.0f);
+        [Header("光照与多次散射 (Lighting & Scattering)")]
+        [Tooltip("太阳/月亮直射光照强度倍率。")]
+        public ClampedFloatParameter sunLightIntensity = new ClampedFloatParameter(1.0f, 0.0f, 3.0f);
 
-        [Tooltip("第二层光线步进体积厚度。")]
-        public ClampedFloatParameter layer2Thickness = new ClampedFloatParameter(10.0f, 0.0f, 50.0f);
+        [Tooltip("比尔-朗伯光线消光吸收系数（控制云体内部光线吸收速率与自阴影深浅，推荐 0.5 ~ 1.5）。")]
+        public ClampedFloatParameter absorption = new ClampedFloatParameter(0.6f, 0.05f, 3.0f);
 
-        [Tooltip("第二层云层光线吸收率。")]
-        public ClampedFloatParameter layer2Absorption = new ClampedFloatParameter(1.0f, 0.0f, 5.0f);
+        [Tooltip("立体自阴影对比度强化（0 = 柔和漫反射，1 = 标准物理阴影，2~3 = 极具戏剧性的立体凹凸背光阴影）。")]
+        public ClampedFloatParameter selfShadowStrength = new ClampedFloatParameter(1.0f, 0.0f, 3.0f);
 
-        [Tooltip("第二层云层平铺缩放比例。")]
-        public MinFloatParameter layer2Scale = new MinFloatParameter(2.5f, 0.1f);
+        [Tooltip("糖粉散射效应（Powder/Sugar Effect，照亮极薄微水滴边缘，避免云体外缘发暗）。")]
+        public ClampedFloatParameter powderEffect = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
 
-        [Tooltip("第二层云层海拔高度（米）。")]
-        public MinFloatParameter layer2Altitude = new MinFloatParameter(6000f, 2000f);
+        [Tooltip("银边前向散射强度（逆光看太阳时边缘强烈的金/白银边）。")]
+        public ClampedFloatParameter silverLiningIntensity = new ClampedFloatParameter(1.42f, 0.0f, 3.0f);
 
-        [Tooltip("第二层相对于基础风速的移动倍率（通常高空风速更快）。")]
-        public ClampedFloatParameter layer2SpeedMultiplier = new ClampedFloatParameter(1.5f, 0.0f, 5.0f);
+        [Tooltip("银边角向扩散范围（数值越小边缘锐利，越大扩散范围越宽）。")]
+        public ClampedFloatParameter silverLiningSpread = new ClampedFloatParameter(0.5f, 0.05f, 0.8f);
 
-        [Header("形态细节与地平线 (Shape & Details)")]
-        [Tooltip("边缘侵蚀细节强度（使用 pow4 非线性侵蚀，使云边撕裂成羽状絮絮，核心保持饱满）。")]
-        public ClampedFloatParameter detailErosion = new ClampedFloatParameter(0.65f, 0.0f, 1.0f);
+        [Tooltip("背光透射强化（背向光源时的边缘光晕增强）。")]
+        public ClampedFloatParameter backlitStrength = new ClampedFloatParameter(0.5f, 0.0f, 1.5f);
 
-        [Tooltip("高频细节噪声平铺频率。")]
-        public MinFloatParameter detailScale = new MinFloatParameter(3.0f, 0.5f);
+        [Tooltip("多重散射强度（模拟光子在云体内无数次折射产生的通透温暖内发光，根除阴影区死黑）。")]
+        public ClampedFloatParameter multiScattering = new ClampedFloatParameter(0.55f, 0.0f, 2.0f);
 
-        [Tooltip("地平线地球曲率视差透视压缩感。")]
-        public ClampedFloatParameter curvature = new ClampedFloatParameter(0.35f, 0.0f, 1.0f);
+        [Tooltip("多重散射随厚度衰减速度。")]
+        public ClampedFloatParameter multiScatterFalloff = new ClampedFloatParameter(0.20f, 0.05f, 2.0f);
 
-        [Tooltip("地平线柔和消隐宽度（避免云层与地面相交过于突兀）。")]
-        public ClampedFloatParameter horizonFade = new ClampedFloatParameter(0.12f, 0.01f, 0.5f);
-
-        [Header("光照与散射 (Lighting & Scattering)")]
-        [Tooltip("逆光银边强度（朝向光源时亨利-格林斯坦前向散射辉光）。")]
-        public ClampedFloatParameter silverLining = new ClampedFloatParameter(2.5f, 0.0f, 10.0f);
-
-        [Tooltip("银边光透射宽度。")]
-        public ClampedFloatParameter silverLiningWidth = new ClampedFloatParameter(0.15f, 0.01f, 0.5f);
-
-        [Tooltip("内部自阴影光线步进采样步数（推荐 4 步，数值越高内部立体阴影层次越精细）。")]
-        public ClampedIntParameter lightmarchSteps = new ClampedIntParameter(4, 1, 8);
-
-        [Tooltip("受日照面云层高光颜色。")]
-        public ColorParameter cloudColor = new ColorParameter(Color.white, false, false, true);
+        [Tooltip("环境底光保底强度（模拟深层厚云内部捕获的环境天光，防止浓云背光面死黑）。")]
+        public ClampedFloatParameter ambientFloor = new ClampedFloatParameter(0.20f, 0.0f, 1.0f);
 
         [Tooltip("云层背光面及底部自阴影基调颜色。")]
-        public ColorParameter shadowColor = new ColorParameter(new Color(0.35f, 0.38f, 0.45f, 1f), false, false, true);
+        public ColorParameter shadowColor = new ColorParameter(new Color(0.42f, 0.45f, 0.52f, 1f), false, false, true);
+
+        [Tooltip("云层固有主色调。")]
+        public ColorParameter cloudColor = new ColorParameter(Color.white, false, false, true);
+
+        [Header("光线步进与性能 (Raymarching & Performance)")]
+        [Tooltip("天顶视线最小步数（仰视垂直穿透云层时，光程短，使用低步数节能）。")]
+        public ClampedIntParameter minSteps = new ClampedIntParameter(32, 8, 96);
+
+        [Tooltip("平视地平线最大步数（平视/斜穿大厚度云层时，光程长，使用高步数保证层次连贯细腻）。")]
+        public ClampedIntParameter maxSteps = new ClampedIntParameter(64, 16, 128);
+
+        [Tooltip("光向自阴影采样步数（推荐 4~6 步）。")]
+        public ClampedIntParameter lightmarchSteps = new ClampedIntParameter(5, 1, 8);
+
+        [Tooltip("启用空旷空间粗细跳跃加速（无云区域双倍步长跳过，大幅节约 GPU 算力）。")]
+        public BoolParameter enableEmptySpaceSkipping = new BoolParameter(true);
+
+        [Tooltip("启用场景深度穿插阻挡（当远山或高空建筑物穿入云层时，在表面截断步进，呈现正确的空间穿插）。")]
+        public BoolParameter enableDepthBlending = new BoolParameter(true);
+
+        [Tooltip("地平线边缘淡出范围（控制云层在地平线附近融入远雾的柔和过渡宽度，数值越大地平线过渡越平缓宽阔）。")]
+        public ClampedFloatParameter horizonFade = new ClampedFloatParameter(0.08f, 0.005f, 0.35f);
+
+        [Tooltip("地平线淡出起始仰角偏移（控制云层开始消隐的地平线垂直高度，负值代表允许穿透至地平线以下）。")]
+        public ClampedFloatParameter horizonFadeStart = new ClampedFloatParameter(-0.01f, -0.05f, 0.1f);
+
+        [Tooltip("低分辨率云层渲染比例：Full(原画 1:1)、Half(半分辨率 1/2，推荐平衡模式)、Quarter(四分之一 1/4，极限性能)。")]
+        public CloudDownscaleParameter downscale = new CloudDownscaleParameter(CloudDownscale.Half);
 
         [Header("阴影投影 (Shadows & Light Cookie)")]
         [Tooltip("是否启用 Directional Light Cookie 投影，在地面和物体上投射实时移动的云层阴影。")]
@@ -157,53 +165,52 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("投射在地面与物体上的阴影衰减浓度（0 = 无阴影，1 = 最深阴影）。")]
         public ClampedFloatParameter shadowStrength = new ClampedFloatParameter(0.6f, 0.0f, 1.0f);
 
-        [Header("性能与画质 (Performance)")]
-        [Tooltip("低分辨率云层渲染比例：Full(原画 1:1)、Half(半分辨率 1/2，推荐平衡模式)、Quarter(四分之一 1/4，极限性能)。")]
-        public CloudDownscaleParameter downscale = new CloudDownscaleParameter(CloudDownscale.Half);
-
         public virtual int GetParameterHashCode()
         {
             unchecked
             {
                 int hash = 17;
-                hash = hash * 31 + enableLayer1.value.GetHashCode();
+                hash = hash * 31 + enableClouds.value.GetHashCode();
                 hash = hash * 31 + shapeType.value.GetHashCode();
                 hash = hash * 31 + detailType.value.GetHashCode();
                 hash = hash * 31 + customBaseTexture.value.GetHashCode();
                 hash = hash * 31 + customDetailTexture.value.GetHashCode();
                 hash = hash * 31 + coverage.value.GetHashCode();
                 hash = hash * 31 + density.value.GetHashCode();
-                hash = hash * 31 + thickness.value.GetHashCode();
-                hash = hash * 31 + absorption.value.GetHashCode();
                 hash = hash * 31 + scale.value.GetHashCode();
                 hash = hash * 31 + altitude.value.GetHashCode();
-                hash = hash * 31 + curvature.value.GetHashCode();
-
-                hash = hash * 31 + enableLayer2.value.GetHashCode();
-                hash = hash * 31 + layer2ShapeType.value.GetHashCode();
-                hash = hash * 31 + layer2DetailType.value.GetHashCode();
-                hash = hash * 31 + layer2CustomBaseTexture.value.GetHashCode();
-                hash = hash * 31 + layer2CustomDetailTexture.value.GetHashCode();
-                hash = hash * 31 + layer2Coverage.value.GetHashCode();
-                hash = hash * 31 + layer2Density.value.GetHashCode();
-                hash = hash * 31 + layer2Thickness.value.GetHashCode();
-                hash = hash * 31 + layer2Absorption.value.GetHashCode();
-                hash = hash * 31 + layer2Scale.value.GetHashCode();
-                hash = hash * 31 + layer2Altitude.value.GetHashCode();
-                hash = hash * 31 + layer2SpeedMultiplier.value.GetHashCode();
-
+                hash = hash * 31 + thickness.value.GetHashCode();
+                hash = hash * 31 + cloudType.value.GetHashCode();
                 hash = hash * 31 + detailErosion.value.GetHashCode();
                 hash = hash * 31 + detailScale.value.GetHashCode();
-                hash = hash * 31 + horizonFade.value.GetHashCode();
-                hash = hash * 31 + silverLining.value.GetHashCode();
-                hash = hash * 31 + silverLiningWidth.value.GetHashCode();
-                hash = hash * 31 + lightmarchSteps.value.GetHashCode();
-                hash = hash * 31 + cloudColor.value.GetHashCode();
+                hash = hash * 31 + bottomRoundness.value.GetHashCode();
+                hash = hash * 31 + topSoftness.value.GetHashCode();
+
+                hash = hash * 31 + sunLightIntensity.value.GetHashCode();
+                hash = hash * 31 + absorption.value.GetHashCode();
+                hash = hash * 31 + selfShadowStrength.value.GetHashCode();
+                hash = hash * 31 + powderEffect.value.GetHashCode();
+                hash = hash * 31 + silverLiningIntensity.value.GetHashCode();
+                hash = hash * 31 + silverLiningSpread.value.GetHashCode();
+                hash = hash * 31 + backlitStrength.value.GetHashCode();
+                hash = hash * 31 + multiScattering.value.GetHashCode();
+                hash = hash * 31 + multiScatterFalloff.value.GetHashCode();
+                hash = hash * 31 + ambientFloor.value.GetHashCode();
                 hash = hash * 31 + shadowColor.value.GetHashCode();
+                hash = hash * 31 + cloudColor.value.GetHashCode();
+
+                hash = hash * 31 + minSteps.value.GetHashCode();
+                hash = hash * 31 + maxSteps.value.GetHashCode();
+                hash = hash * 31 + lightmarchSteps.value.GetHashCode();
+                hash = hash * 31 + enableEmptySpaceSkipping.value.GetHashCode();
+                hash = hash * 31 + enableDepthBlending.value.GetHashCode();
+                hash = hash * 31 + horizonFade.value.GetHashCode();
+                hash = hash * 31 + horizonFadeStart.value.GetHashCode();
+                hash = hash * 31 + downscale.value.GetHashCode();
+
                 hash = hash * 31 + castShadows.value.GetHashCode();
                 hash = hash * 31 + shadowArea.value.GetHashCode();
                 hash = hash * 31 + shadowStrength.value.GetHashCode();
-                hash = hash * 31 + downscale.value.GetHashCode();
                 return hash;
             }
         }

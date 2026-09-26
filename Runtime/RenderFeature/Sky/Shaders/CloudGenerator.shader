@@ -14,43 +14,32 @@ Shader "Hidden/EAStudio/CloudGenerator"
 
         Pass
         {
-            Name "GenerateCloudsPass"
+            Name "GenerateVolumetricClouds"
 
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
-            #pragma target 3.0
+            #pragma target 3.5
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+            #include "VolumetricCloudCore.hlsl"
 
-            TEXTURE2D(_Cloud_0_Tex);
-            TEXTURE2D(_Cloud_0_DetailTex);
-            TEXTURE2D(_Cloud_1_Tex);
-            TEXTURE2D(_Cloud_1_DetailTex);
+            TEXTURE2D(_BaseTex);
+            TEXTURE2D(_DetailTex);
 
             CBUFFER_START(UnityPerMaterial)
-                float4 _Cloud_0_SampleParams;       // x: scale, y: curvature*0.5, z: 1 - coverage, w: rev_inv_coverage
-                float4 _Cloud_0_DetailParams;       // x: detailScale, y: detailWeight
-                float4 _Cloud_0_SilverLiningParams; // x: width, y: strength
-                float4 _Cloud_0_MaskParams;         // x: rcp(horizonMask), y: horizonMaskBlend, z: rcp(1-zenithMask), w: zenithMaskBlend
-                float4 _Cloud_0_LightingParams;     // x: opacity, y: absorption, z: absorptionLimit, w: thickness * 0.02
-                float4 _Cloud_0_WindVector;         // xy: windVector, w: detailWindSpeed
-                float4 _Cloud_0_LightmarchSteps;    // x: steps, y: rcp(steps)
-                float4 _Cloud_0_Color;
-                float4 _Cloud_0_LightTransmittance;
+                float4 _Cloud_Params0;      // x: scale, y: coverage, z: density, w: cloudType
+                float4 _Cloud_Params1;      // x: detailScale, y: detailErosion, z: bottomRoundness, w: topSoftness
+                float4 _Cloud_Params2;      // x: altitude, y: thickness, z: earthRadius, w: horizonFade
+                float4 _Cloud_Lighting;     // x: absorption, y: selfShadowStrength, z: powderEffect, w: sunLightIntensity
+                float4 _Cloud_Lighting2;    // x: silverLiningIntensity, y: silverLiningSpread, z: backlitStrength, w: ambientFloor
+                float4 _Cloud_Scattering;   // x: multiScattering, y: multiScatterFalloff, z: horizonFadeStart, w: 0
+                float4 _Cloud_Steps;        // x: minSteps, y: maxSteps, z: lightmarchSteps, w: enableSkipping
+                float4 _Cloud_WindVector;   // xy: windOffset, z: detailWindSpeed, w: 0
+                float4 _Cloud_Color;        // rgb: cloudColor
 
-                float4 _Cloud_1_SampleParams;
-                float4 _Cloud_1_DetailParams;
-                float4 _Cloud_1_SilverLiningParams;
-                float4 _Cloud_1_MaskParams;
-                float4 _Cloud_1_LightingParams;
-                float4 _Cloud_1_WindVector;
-                float4 _Cloud_1_LightmarchSteps;
-                float4 _Cloud_1_Color;
-                float4 _Cloud_1_LightTransmittance;
-
-                float4 _ParallaxTransitionedMainLightDir;
                 float4 _SunDirection;
                 float4 _SunColor;
                 float4 _GroundColor;
@@ -89,137 +78,113 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 return output;
             }
 
-            float smootherstep(float a, float b, float x)
+            // Static 4x4 Ordered Bayer Dither (Smooth & temporal-noise-free)
+            float GetBayer4x4(float2 screenPos)
             {
-                x = saturate((x - a) / max(0.0001, b - a));
-                return x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+                int2 p = int2(fmod(screenPos, 4.0));
+                static const float bayer[16] = {
+                     0.0 / 16.0,  8.0 / 16.0,  2.0 / 16.0, 10.0 / 16.0,
+                    12.0 / 16.0,  4.0 / 16.0, 14.0 / 16.0,  6.0 / 16.0,
+                     3.0 / 16.0, 11.0 / 16.0,  1.0 / 16.0,  9.0 / 16.0,
+                    15.0 / 16.0,  7.0 / 16.0, 13.0 / 16.0,  5.0 / 16.0
+                };
+                return bayer[p.y * 4 + p.x];
             }
 
-            float hg(float eyeCos, float g)
+            // -------------------------------------------------------------------
+            // Enviro 3 Exact Cloud Density & Shaping Pipeline
+            // -------------------------------------------------------------------
+            float SampleCloudDensity(float3 pos, float3 planetCenter, float innerRadius, float thickness, float lod, bool sampleDetail)
             {
-                float g2 = g * g;
-                return (1.0 - g2) / (4.0 * 3.14159265 * pow(max(1.0 + g2 - 2.0 * g * eyeCos, 0.001), 1.5));
-            }
+                float height = CalculateHeightFraction(pos, planetCenter, innerRadius, thickness);
+                if (height <= 0.001 || height >= 0.999)
+                    return 0.0;
 
-            void ProcessCloudLayer(
-                Texture2D tex,
-                Texture2D detailTex,
-                float4 sampleParams,
-                float2 detailParams,
-                float2 silverLiningParams,
-                float4 maskParams,
-                float4 lightingParams,
-                float4 windVector,
-                float2 lightmarchSteps,
-                float3 layerColor,
-                float3 rayDir,
-                float3 L,
-                float3 directSunLight,
-                float3 ambientSky,
-                float eyeCos,
-                float phase,
-                float eyeCos_moon,
-                float moonPhase,
-                float sunDirectIntensity,
-                float timeVal,
-                float2 parallaxMainLightDir,
-                inout float3 color,
-                inout float totalTransmittance)
-            {
-                // If coverage is 0 or layer disabled, sampleParams.w == 0, strictly skip!
-                if (sampleParams.w < 0.001)
-                    return;
+                // 1. Wind settings & height advection (wind shear tilt)
+                float cloud_top_offset = thickness * 0.45;
+                float2 windDir = length(_Cloud_WindVector.xy) > 1e-5 ? normalize(_Cloud_WindVector.xy) : float2(1.0, 0.0);
+                float3 advectedPos = pos;
+                advectedPos.xz += height * windDir * cloud_top_offset;
+                advectedPos.xz += _Cloud_WindVector.xy * 1200.0;
 
-                float curvature = sampleParams.y;
-                float2 parallaxViewDir = rayDir.xz * rcp(lerp(rayDir.y, 1.0, curvature));
-                float2 samplePos = parallaxViewDir * sampleParams.x * (curvature + 1.0);
-                float2 windOffset = windVector.xy * timeVal;
-                float2 samplePosBase = samplePos + windOffset;
+                // 2. Base coordinates & procedural multi-octave FBM
+                const float baseFreq = 1e-5;
+                float baseScale = _Cloud_Params0.x * 2.8;
+                float2 coordBase = advectedPos.xz * (baseFreq * baseScale);
 
-                // Base fractal density
-                float rawTex = SAMPLE_TEXTURE2D_LOD(tex, sampler_LinearRepeat, samplePosBase, 0).r;
-                float rawDiff = rawTex - sampleParams.z;
-                if (rawDiff <= 0.0)
-                    return;
+                float baseNoiseR = SAMPLE_TEXTURE2D_LOD(_BaseTex, sampler_LinearRepeat, coordBase, lod * 0.5).r;
+                float baseNoiseG = SAMPLE_TEXTURE2D_LOD(_BaseTex, sampler_LinearRepeat, coordBase * 2.17 + float2(0.35, 0.65), lod * 0.5 + 0.5).r;
+                float baseNoiseB = SAMPLE_TEXTURE2D_LOD(_BaseTex, sampler_LinearRepeat, coordBase * 4.31 + float2(0.12, 0.81), lod * 0.5 + 1.0).r;
+                float low_freq_fBm = (baseNoiseG * 0.625) + (baseNoiseB * 0.375);
 
-                float density = rawDiff * sampleParams.w;
-                float baseDensity = density;
+                // 3. Base cloud with low-frequency erosion
+                float baseErosion = _Cloud_Params1.y;
+                float base_cloud = RemapEnviro(baseNoiseR, -(1.0 - low_freq_fBm) * (baseErosion * 0.85), 1.0, 0.0, 1.0);
 
-                if (density > 0.0)
+                // 4. Enviro 3 Vertical Shaping
+                float bottomShape = _Cloud_Params1.z;
+                float midShape    = 1.0 - abs(_Cloud_Params0.w - 0.5) * 2.0;
+                float topShape    = _Cloud_Params1.w;
+                float rampShape   = 0.25;
+                float targetShape = CloudVerticalShapingEnviro(height, bottomShape, midShape, topShape, rampShape);
+
+                float4 gradient = GetHeightGradientEnviro(_Cloud_Params0.w);
+                float heightGradient = GradientStepEnviro(height, gradient);
+                float shapedCloud = base_cloud * targetShape;
+                shapedCloud *= lerp(1.0, heightGradient, 0.75);
+
+                // 5. Coverage Remap (Enviro exact thresholding)
+                float coverage = _Cloud_Params0.y;
+                float cloud_coverage = saturate(1.0 - coverage);
+                if (height > 0.90)
+                    cloud_coverage = saturate(cloud_coverage + (height - 0.90) * 5.0);
+
+                float cloudDensity = RemapEnviro(shapedCloud, cloud_coverage, 1.0, 0.0, 1.0);
+
+                // 6. Detail Noise Erosion with Height Inversion (fine wispy top fibers)
+                if (sampleDetail && _Cloud_Params1.y > 0.01 && cloudDensity > 0.001)
                 {
-                    float2 samplePosDetail = samplePos * detailParams.x + windOffset * windVector.w;
-                    float detail = SAMPLE_TEXTURE2D_LOD(detailTex, sampler_LinearRepeat, samplePosDetail, 0).r;
-                    float erodeWeight = pow(saturate(1.0 - density), 4.0) * detailParams.y;
-                    density = max(0.0, density - (1.0 - detail) * erodeWeight);
-                    density = smoothstep(0.0, 0.04, density) * density;
+                    float detailScale = _Cloud_Params1.x * 2.2;
+                    float2 coordDetail = advectedPos.xz * (baseFreq * baseScale * detailScale) + _Cloud_WindVector.xy * (1200.0 * _Cloud_WindVector.z);
+
+                    float d1 = SAMPLE_TEXTURE2D_LOD(_DetailTex, sampler_LinearRepeat, coordDetail, lod).r;
+                    float d2 = SAMPLE_TEXTURE2D_LOD(_DetailTex, sampler_LinearRepeat, coordDetail * 2.23 + float2(0.25, 0.75), lod + 0.5).r;
+                    float high_freq_fBm = (d1 * 0.65) + (d2 * 0.35);
+
+                    float high_freq_noise_modifier = lerp(high_freq_fBm, 1.0 - high_freq_fBm, saturate(height * 8.0));
+                    cloudDensity = RemapEnviro(cloudDensity, saturate(high_freq_noise_modifier * baseErosion * 0.65), 1.0, 0.0, 1.0);
                 }
 
-                if (density <= 0.0001)
-                    return;
+                if (height > 0.90)
+                    cloudDensity *= smoothstep(1.0, 0.88, height);
 
-                // Horizon mask only: smoothly fades near ground, keeps zenith (正上方) 100% full and continuous
-                float tH = smootherstep(maskParams.y, 1.0, (rayDir.y + 0.02) * maskParams.x);
-                float mul = tH;
+                return cloudDensity * _Cloud_Params0.z;
+            }
 
-                float transmittance = exp(-density * mul * lightingParams.x);
+            // Enviro 3 Exact Light Marching (6-tap exponentially expanding shadow sample pattern)
+            float GetDensityAlongRayEnviro(float3 pos, float3 lightDir, float3 planetCenter, float innerRadius, float thickness, int numSteps)
+            {
+                static const float shadowSampleDist[6] = {0.25, 1.0, 3.0, 8.0, 16.0, 32.0};
+                float opticalDepth = 0.0;
+                float distanceTraveled = 0.0;
+                float sunHeight = saturate(dot(lightDir, float3(0.0, 1.0, 0.0)));
+                float airPathFactor = lerp(0.6, 1.4, pow(sunHeight, 0.5));
 
-                // Light marching step: marches through cloud slab along sunlight direction
-                // Prevents step vector from collapsing to 0 at the sun position (which caused the dark hole!)
-                float2 sunSlabDir = -normalize(L.xz + float2(0.0001, 0.0001));
-                float2 dirToLight = (parallaxMainLightDir - parallaxViewDir);
-                float dirLen = length(dirToLight);
-                float2 viewShift = dirLen > 0.001 ? (dirToLight / dirLen * min(dirLen, 2.0)) : float2(0, 0);
-
-                float2 stepDir = normalize(sunSlabDir + viewShift * 0.35);
-                float2 lightRayStep = lightingParams.w * lightmarchSteps.y * stepDir * 0.15;
-                float jitter = frac(sin(dot(samplePosBase * 50.0, float2(12.9898, 78.233))) * 43758.5453);
-                float2 lightRayPos = samplePosBase + lightRayStep * (jitter * 0.5 + 0.5);
-
-                float lightAtt = baseDensity * 0.5;
-
-                int steps = (int)lightmarchSteps.x;
                 UNITY_LOOP
-                for (int l = 0; l < steps; l++)
+                for (int i = 0; i < numSteps && i < 6; i++)
                 {
-                    float stepVal = max(0.0, SAMPLE_TEXTURE2D_LOD(tex, sampler_LinearRepeat, lightRayPos, 0).r - sampleParams.z) * sampleParams.w;
-                    lightAtt += stepVal;
-                    lightRayPos += lightRayStep;
+                    float altitude = pos.y;
+                    float densityFalloff = exp(-altitude / 5000.0) * 0.25;
+                    float baseStep = shadowSampleDist[i] * (thickness * 0.12) * densityFalloff * airPathFactor;
+                    distanceTraveled += baseStep;
+
+                    float3 samplePos = pos + lightDir * distanceTraveled;
+                    float d = SampleCloudDensity(samplePos, planetCenter, innerRadius, thickness, float(i) * 0.6, false);
+                    float weight = exp(-0.7 * float(i));
+                    opticalDepth += weight * d * baseStep;
                 }
 
-                // Smooth Beer-Lambert absorption without harsh cliff
-                float attFactor = lightAtt * lightmarchSteps.y * lightingParams.y;
-                float absorptionCurve = exp(-attFactor * 0.7);
-                float absorptionLimit = lightingParams.z;
-                float absorption = lerp(absorptionLimit, 1.0, absorptionCurve);
-
-                // Forward scattering glow inside cloud body looking toward the sun (prevents dark hole)
-                float forwardGlow = pow(eyeCos, 6.0) * 0.35;
-                absorption = max(absorption, forwardGlow + absorptionLimit * 0.8);
-
-                // Physical continuous forward scattering (replaces harsh step-cliff with exponential penetration)
-                float hgNorm = min(phase, 2.0);
-                float forwardScatter = exp(-density * 3.5);
-                float silverLining = hgNorm * forwardScatter * min(silverLiningParams.y, 1.2) * 0.4;
-
-                // --- Atmospheric Day / Sunset / Night Lighting ---
-                // 1. Direct Sunlit component: fades out at night, glows golden-red at sunset
-                float3 sunlitColor = directSunLight * (silverLining + absorption);
-
-                // 2. Ambient Sky/Ground component: soft blue in day, rose-purple at dusk, dark at night
-                float3 ambientColor = ambientSky * (0.55 + 0.45 * (1.0 - absorption));
-
-                // 3. Moonlight illumination on clouds at night (soft exponential penetration, zero hard cliff)
-                float moonHG = min(moonPhase, 2.0);
-                float moonScatter = exp(-density * 3.5);
-                float moonSilver = moonHG * moonScatter * min(silverLiningParams.y, 1.2) * 0.4;
-                float3 moonLight = _MoonColor.rgb * _MoonLightIntensity * (moonSilver + absorption * 0.3);
-                float3 nocturnalLight = moonLight * (1.0 - sunDirectIntensity);
-
-                // 4. Combined cloud color modulated by layer tint
-                float3 cloudColor = (sunlitColor + ambientColor + nocturnalLight) * layerColor;
-
-                totalTransmittance *= transmittance;
-                color = lerp(cloudColor, color, transmittance);
+                return opticalDepth;
             }
 
             half4 Frag(Varyings input) : SV_Target
@@ -227,94 +192,207 @@ Shader "Hidden/EAStudio/CloudGenerator"
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
                 float3 worldPos = ComputeWorldSpacePosition(input.uv, UNITY_RAW_FAR_CLIP_VALUE, UNITY_MATRIX_I_VP);
-                float3 rayDir = normalize(worldPos - _WorldSpaceCameraPos.xyz);
+                float3 camPos   = _WorldSpaceCameraPos.xyz;
+                float3 rayDir   = normalize(worldPos - camPos);
 
-                if (rayDir.y <= -0.01)
+                // Horizon fade mask setup
+                float horizonFadeWidth = max(0.005, _Cloud_Params2.w);
+                float horizonFadeStart = _Cloud_Scattering.z;
+                float horizonFadeMask  = smoothstep(horizonFadeStart, horizonFadeStart + horizonFadeWidth, rayDir.y);
+
+                if (horizonFadeMask <= 0.0001)
                     return half4(0.0, 0.0, 0.0, 0.0);
 
-                // Early exit if both layers are disabled or have 0 coverage
-                if (_Cloud_0_SampleParams.w < 0.001 && _Cloud_1_SampleParams.w < 0.001)
+                // Planet center & spherical atmosphere bounds
+                float earthRadius = _Cloud_Params2.z;
+                float3 planetCenter = float3(camPos.x, -earthRadius, camPos.z);
+                float altitude = _Cloud_Params2.x;
+                float thickness = _Cloud_Params2.y;
+                float innerRadius = earthRadius + altitude;
+                float outerRadius = innerRadius + thickness;
+
+                float tStart, tEnd;
+                if (!ResolveRayStartEnd(camPos, rayDir, planetCenter, innerRadius, outerRadius, tStart, tEnd))
                     return half4(0.0, 0.0, 0.0, 0.0);
 
-                float3 L = _SunDirection.xyz;
-                float lenSq = dot(L, L);
-                if (lenSq < 0.001) L = float3(0.0, 0.7071, 0.7071);
-                else L = L * rsqrt(lenSq);
+                if (tEnd <= tStart || tEnd <= 0.0)
+                    return half4(0.0, 0.0, 0.0, 0.0);
 
-                float eyeCos = max(0.0, dot(rayDir, L));
-                float phase = hg(eyeCos, 0.9) * 0.7;
+                // Scene depth clipping
+                float rawDepth = SampleSceneDepth(input.uv);
+#if UNITY_REVERSED_Z
+                bool isBackground = rawDepth < 0.0001;
+#else
+                bool isBackground = rawDepth > 0.9999;
+#endif
+                if (!isBackground)
+                {
+                    float3 sceneWorldPos = ComputeWorldSpacePosition(input.uv, rawDepth, UNITY_MATRIX_I_VP);
+                    float sceneDist = length(sceneWorldPos - camPos);
+                    tEnd = min(tEnd, sceneDist);
+                    if (tEnd <= tStart)
+                        return half4(0.0, 0.0, 0.0, 0.0);
+                }
 
-                // Moonlight forward scattering
-                float3 M = _MoonDirection.xyz;
-                float lenM = dot(M, M);
-                if (lenM < 0.001) M = float3(0.0, 0.7071, -0.7071);
-                else M = M * rsqrt(lenM);
-                float eyeCos_moon = max(0.0, dot(rayDir, M));
-                float moonPhase = hg(eyeCos_moon, 0.85);
+                // Celestial light directions and colors (Previous clean version)
+                float3 L = normalize(_SunDirection.xyz);
+                float3 M = normalize(_MoonDirection.xyz);
+                float nightFactor = smoothstep(0.04, -0.06, L.y);
 
-                // --- Sun Elevation Driven Lighting (Day -> Sunset -> Night) ---
-                // 1. Direct sunlight intensity: 1.0 in day (L.y > 0.05), fades smoothly to 0.0 at night (L.y < -0.15)
-                float sunDirectIntensity = smoothstep(-0.15, 0.05, L.y);
+                float sunsetExtinctionFactor = smoothstep(0.25, 0.05, L.y) * smoothstep(-0.01, 0.04, L.y);
+                float sunAlt = max(L.y, 0.001);
+                float airmass = 1.0 / max(0.035, sunAlt + 0.16);
+                float3 rayleighExtinction = exp(-float3(0.04, 0.22, 0.75) * (airmass * 2.0));
+                float3 effectiveSunColor = saturate(lerp(_SunColor.rgb, _SunColor.rgb * rayleighExtinction * 1.4, sunsetExtinctionFactor));
 
-                // 2. Sunset color transition: shifts smoothly as sun approaches and dips below horizon
-                float sunsetProgress = smoothstep(0.28, -0.02, L.y);
-                float3 sunsetColor = lerp(float3(1.0, 0.95, 0.90), float3(1.0, 0.45, 0.12), smoothstep(0.28, 0.05, L.y));
-                sunsetColor = lerp(sunsetColor, float3(0.95, 0.22, 0.06), smoothstep(0.05, -0.05, L.y));
-                float3 directSunLight = lerp(float3(1.0, 1.0, 1.0), sunsetColor, sunsetProgress) * sunDirectIntensity * _SunColor.rgb;
+                float3 directSunLight = effectiveSunColor * smoothstep(-0.02, 0.04, L.y);
+                float3 directMoonLight = _MoonColor.rgb * (_MoonLightIntensity * nightFactor);
 
-                // 3. Dynamic skylight & ambient lighting transition (driven by physical sky dome color & sunset reddening)
+                float3 activeLightDir = normalize(lerp(L, M, nightFactor));
+                float3 activeLightColor = lerp(directSunLight, directMoonLight, nightFactor);
+                float sunHeight = saturate(dot(activeLightDir, float3(0.0, 1.0, 0.0)));
+
+                // Sky dome ambient
                 float daylightFactor = smoothstep(-0.18, 0.12, L.y);
-                float sunsetFactor = smoothstep(0.25, -0.02, L.y) * smoothstep(-0.15, 0.08, L.y);
-
+                float sunsetTwilightFactor = smoothstep(0.25, -0.02, L.y) * smoothstep(-0.15, 0.08, L.y);
                 float3 dayAmbient = _AmbientSkyColor.rgb;
                 float3 sunsetAmbient = _AmbientSunsetColor.rgb;
-                float3 nightAmbient = _NightSkyColor.rgb * 1.5 + float3(0.015, 0.02, 0.035);
+                float3 nightAmbient = _NightSkyColor.rgb * 1.2 + float3(0.005, 0.008, 0.015);
+                float3 skyDomeLight = lerp(nightAmbient, lerp(dayAmbient, sunsetAmbient, sunsetTwilightFactor), daylightFactor);
 
-                // Ground bounce light adds earth tone on cloud undersides
-                float3 groundBounce = _GroundColor.rgb * (saturate(L.y * 1.5 + 0.2) * 0.35 + 0.05);
-                float3 skyDomeLight = lerp(nightAmbient, lerp(dayAmbient, sunsetAmbient, sunsetFactor), daylightFactor);
-                float3 shadowMod = max(_ShadowColor.rgb, float3(0.05, 0.05, 0.05));
-                float3 ambientSky = lerp(groundBounce, skyDomeLight, saturate(rayDir.y * 1.8 + 0.1)) * shadowMod;
+                // Raymarch step setup
+                float minSteps = _Cloud_Steps.x;
+                float maxSteps = _Cloud_Steps.y;
+                int lightSteps = (int)clamp(_Cloud_Steps.z, 1.0, 6.0);
+                bool enableSkipping = _Cloud_Steps.w > 0.5;
 
-                float timeVal = (_CloudWindTime > 0.0001) ? _CloudWindTime : _Time.y;
+                float elevation = saturate(rayDir.y * 1.6);
+                int targetSteps = (int)clamp(lerp(maxSteps, minSteps, elevation), 8.0, 96.0);
+                float totalPath = tEnd - tStart;
+                float rayStepLength = totalPath / float(targetSteps);
+                float3 rayStep = rayDir * rayStepLength;
 
-                float3 cloudColor = float3(0.0, 0.0, 0.0);
-                float totalTransmittance = 1.0;
+                // Static Bayer dither
+                float bayerDither = GetBayer4x4(input.positionCS.xy);
+                float3 currentPos = camPos + rayDir * (tStart + bayerDither * (rayStepLength * 0.35));
 
-                // Layer 1 (Low altitude)
-                ProcessCloudLayer(
-                    _Cloud_0_Tex,
-                    _Cloud_0_DetailTex,
-                    _Cloud_0_SampleParams,
-                    _Cloud_0_DetailParams.xy,
-                    _Cloud_0_SilverLiningParams.xy,
-                    _Cloud_0_MaskParams,
-                    _Cloud_0_LightingParams,
-                    _Cloud_0_WindVector,
-                    _Cloud_0_LightmarchSteps.xy,
-                    _Cloud_0_Color.rgb,
-                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, eyeCos_moon, moonPhase, sunDirectIntensity, timeVal,
-                    _ParallaxTransitionedMainLightDir.xy,
-                    cloudColor, totalTransmittance);
+                float cosTheta = dot(rayDir, activeLightDir);
 
-                // Layer 2 (High altitude)
-                ProcessCloudLayer(
-                    _Cloud_1_Tex,
-                    _Cloud_1_DetailTex,
-                    _Cloud_1_SampleParams,
-                    _Cloud_1_DetailParams.xy,
-                    _Cloud_1_SilverLiningParams.xy,
-                    _Cloud_1_MaskParams,
-                    _Cloud_1_LightingParams,
-                    _Cloud_1_WindVector,
-                    _Cloud_1_LightmarchSteps.xy,
-                    _Cloud_1_Color.rgb,
-                    rayDir, L, directSunLight, ambientSky, eyeCos, phase, eyeCos_moon, moonPhase, sunDirectIntensity, timeVal,
-                    _ParallaxTransitionedMainLightDir.xy,
-                    cloudColor, totalTransmittance);
+                // Enviro lighting parameters packing (Restored clean parameters)
+                EnviroLightParameters lightParams;
+                lightParams.scatteringCoef        = _Cloud_Lighting.w * 1.5;   // sunLightIntensity
+                lightParams.silverLiningIntensity = _Cloud_Lighting2.x;        // silverLiningIntensity
+                lightParams.silverLiningSpread    = _Cloud_Lighting2.y;        // silverLiningSpread
+                lightParams.edgeHighlightStrength = _Cloud_Lighting.z;         // powderEffect
+                lightParams.multiScatterStrength  = _Cloud_Scattering.x;       // multiScattering
+                lightParams.multiScatterFalloff   = _Cloud_Scattering.y;       // multiScatterFalloff
+                lightParams.ambientFloor          = _Cloud_Lighting2.w * 0.5;  // ambientFloor
+                lightParams.lightAbsorb           = _Cloud_Lighting.x;         // absorption
+                lightParams.exposure              = 1.0;
 
-                float opacity = saturate(1.0 - totalTransmittance);
-                return half4(cloudColor, opacity);
+                // Main Raymarching Loop (Enviro 3 Exact Integration)
+                float trans = 1.0;
+                float accumIntensity = 0.0;
+                float depthAccum = 0.0;
+                float depthWeightSum = 0.00001;
+
+                float cloud_test = 0.0;
+                int zeroSampleCount = 0;
+
+                UNITY_LOOP
+                for (int s = 0; s < targetSteps; s++)
+                {
+                    if (trans <= 0.01)
+                        break;
+
+                    float distToCam = length(currentPos - camPos);
+                    float lod = saturate((distToCam - 2000.0) / 35000.0) * 3.5;
+
+                    if (enableSkipping && cloud_test <= 0.0)
+                    {
+                        float dTest = SampleCloudDensity(currentPos, planetCenter, innerRadius, thickness, lod + 1.0, false);
+                        if (dTest <= 0.001)
+                        {
+                            currentPos += rayStep * 2.0;
+                            continue;
+                        }
+                        else
+                        {
+                            currentPos -= rayStep;
+                            cloud_test = 1.0;
+                            zeroSampleCount = 0;
+                        }
+                    }
+
+                    float sampled_density = SampleCloudDensity(currentPos, planetCenter, innerRadius, thickness, lod, true);
+
+                    if (sampled_density <= 0.001)
+                    {
+                        zeroSampleCount++;
+                        if (zeroSampleCount >= 6)
+                        {
+                            cloud_test = 0.0;
+                        }
+                        currentPos += rayStep;
+                        continue;
+                    }
+                    else
+                    {
+                        zeroSampleCount = 0;
+                    }
+
+                    // 1. Extinction & Transmittance (Enviro density smoothness formula)
+                    float extinction = pow(max(_Cloud_Params0.z * sampled_density, 0.0001), 1.25);
+                    float stepTransmittance = exp(-extinction * (rayStepLength * 0.00085));
+
+                    // 2. Optical depth along light ray
+                    float tau = GetDensityAlongRayEnviro(currentPos, activeLightDir, planetCenter, innerRadius, thickness, lightSteps);
+
+                    // 3. Exact Enviro Energy calculation
+                    float luminance = SampleEnviroEnergy(cosTheta, sunHeight, tau, lightParams);
+
+                    // 4. Inscattering integration
+                    float integScatt = luminance - luminance * stepTransmittance;
+
+                    accumIntensity += trans * integScatt;
+                    depthAccum     += trans * distToCam;
+                    depthWeightSum += trans;
+
+                    trans *= stepTransmittance;
+                    currentPos += rayStep;
+                }
+
+                // Enviro 3 Blend Pass & Smooth Horizon Transition
+                float cloudAlpha = saturate(1.0 - trans);
+
+                // Feather out micro-alpha boundaries to eliminate edge stepping/dark halos
+                float microFeather = smoothstep(0.0001, 0.035, cloudAlpha);
+                cloudAlpha *= microFeather;
+
+                float cloudDistance = depthWeightSum > 0.0001 ? (depthAccum / depthWeightSum) : tStart;
+                float3 sunColor = pow(activeLightColor.rgb, 2.0) * 2.5;
+
+                // Height influence on ambient sky light
+                float3 cloudCenterPos = camPos + rayDir * cloudDistance;
+                float normalizedHeight = CalculateHeightFraction(cloudCenterPos, planetCenter, innerRadius, thickness);
+                float heightFactor = lerp(0.7, 1.3, normalizedHeight);
+                float distFalloff = exp(-cloudDistance * 0.000015);
+                float ambientVal = saturate(cloudAlpha * heightFactor * distFalloff);
+
+                // Clean ambient lighting without muddy complementary tint shifts
+                float3 cloudRGB = (accumIntensity * sunColor + skyDomeLight * (ambientVal * _Cloud_Lighting2.w * 1.6)) * _Cloud_Color.rgb;
+
+                // Atmospheric Blend Distance (Enviro Blend)
+                float cloudLum = dot(saturate(cloudRGB), float3(0.299, 0.587, 0.114));
+                float baseDist = 70000.0;
+                float blendDist = lerp(baseDist * 0.85, baseDist * 1.85, cloudLum);
+                float atmosphericBlendFactor = saturate(exp(-cloudDistance / blendDist));
+                cloudRGB = lerp(skyDomeLight, cloudRGB, atmosphericBlendFactor);
+
+                // Horizon Fade: smoothly melts clouds into the distant atmospheric horizon haze
+                cloudAlpha *= horizonFadeMask;
+
+                return half4(cloudRGB, cloudAlpha);
             }
             ENDHLSL
         }
