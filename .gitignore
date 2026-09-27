@@ -18,6 +18,9 @@ ExportedObj/
 *.DS_Store
 Thumbs.db
 
-.docs/
+docs/
+docs.meta
+docs*
+
 AGENTS.md*
 MEMORY.md*
