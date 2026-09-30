@@ -19,7 +19,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             s_ProceduralController.SetShaderOverride(proceduralShader);
         }
 
-        public static void UpdateHDRIEnvironment(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky)
+        public static void UpdateHDRIEnvironment(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky, bool hasClouds = false)
         {
             if (visualEnv == null || hdriSky == null || hdriSky.hdriSky.value == null)
             {
@@ -27,7 +27,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 return;
             }
 
-            s_HDRIController.Update(camera, visualEnv, hdriSky);
+            s_HDRIController.Update(camera, visualEnv, hdriSky, hasClouds);
         }
 
         public static void UpdateProceduralEnvironment(Camera camera, VisualEnvironment visualEnv, ProceduralSky proceduralSky, MoonSettings moonSettings = null, bool hasClouds = false)

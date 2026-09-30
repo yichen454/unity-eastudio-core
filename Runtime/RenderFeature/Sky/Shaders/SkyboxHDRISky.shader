@@ -49,6 +49,9 @@ Shader "Skybox/EAStudio/HDRISky"
             SAMPLER(sampler_TexB);
             half4 _TexB_HDR;
 
+            TEXTURE2D(_CloudTexture);
+            float _HasClouds;
+
             CBUFFER_START(UnityPerMaterial)
                 float4 _Tint;
                 float _Exposure;
@@ -109,6 +112,14 @@ Shader "Skybox/EAStudio/HDRISky"
 
                 // Pure linear exposure multiplier (1.0 = normal, 2.0 = 2x brighter)
                 col *= _Exposure;
+
+                // Tropospheric Cloud Deck Occlusion (Physical Pre-multiplied Alpha)
+                if (_HasClouds > 0.5)
+                {
+                    float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
+                    half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
+                    col = col * (1.0 - cloud.a) + cloud.rgb;
+                }
 
                 return half4(col, 1.0);
             }

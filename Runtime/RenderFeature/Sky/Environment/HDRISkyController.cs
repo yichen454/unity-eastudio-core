@@ -16,6 +16,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_RotationID = Shader.PropertyToID("_Rotation");
         private static readonly int s_ExposureID = Shader.PropertyToID("_Exposure");
         private static readonly int s_TintID = Shader.PropertyToID("_Tint");
+        private static readonly int s_HasCloudsID = Shader.PropertyToID("_HasClouds");
 
         private Shader m_ShaderOverride;
         private Shader m_Shader;
@@ -55,7 +56,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             return m_Material;
         }
 
-        public void Update(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky)
+        public void Update(Camera camera, VisualEnvironment visualEnv, HDRISky hdriSky, bool hasClouds = false)
         {
             if (visualEnv == null || hdriSky == null || hdriSky.hdriSky.value == null)
                 return;
@@ -77,6 +78,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 skyMat.SetFloat(s_RotationID, rotation);
                 skyMat.SetFloat(s_ExposureID, exposure);
                 skyMat.SetColor(s_TintID, tint);
+                skyMat.SetFloat(s_HasCloudsID, hasClouds ? 1.0f : 0.0f);
 
                 SkyboxMaterialManager.ApplySkybox(skyMat);
             }
@@ -93,6 +95,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + lightingMultiplier.GetHashCode();
                 hash = hash * 31 + tint.GetHashCode();
                 hash = hash * 31 + ((int)ambientMode).GetHashCode();
+                hash = hash * 31 + (hasClouds ? 1 : 0);
 
                 if (hash == m_LastStateHash)
                     return;

@@ -417,8 +417,8 @@ Shader "Skybox/EAStudio/ProceduralSky"
                     // 2. Composite background sky (atmosphere + extinguished celestial bodies)
                     float3 backgroundSky = scattering * (1.0 - moonMask) + moonFinal + sunFinal;
 
-                    // 3. Clouds blend smoothly over deep sky background without dark edge halos
-                    scattering = lerp(backgroundSky, cloud.rgb, cloud.a);
+                    // 3. Physical pre-multiplied inscattering blend (Takram / Frostbite standard)
+                    scattering = backgroundSky * (1.0 - cloud.a) + cloud.rgb;
                 }
                 else
                 {
