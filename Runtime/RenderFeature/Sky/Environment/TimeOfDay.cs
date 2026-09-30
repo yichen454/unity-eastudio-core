@@ -74,7 +74,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         [Header("美术自定义轨道参数 (Custom Orbit)")]
         [Tooltip("自定义太阳在 X 轴上的时间角度偏移（默认 -6 小时使 12:00 对应天顶 90°）。")]
-        public float customSunOffset = -6f;
+        public float customSunOffset = 0f;
 
         [Tooltip("自定义太阳罗盘朝向偏角 (0-360度)。")]
         [Range(0f, 360f)]
@@ -184,11 +184,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 InitDefaultGradients();
             }
 
-            if (sunIntensityCurve == null || sunIntensityCurve.keys.Length == 0 ||
-                moonIntensityCurve == null || moonIntensityCurve.keys.Length == 0)
-            {
-                InitDefaultCurves();
-            }
+            ValidateCurves();
 
             AutoFindLights();
             m_LastEvaluatedHour = Hour;
@@ -225,21 +221,34 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         private void InitDefaultCurves()
         {
+            // SolarTime: 0.0 = midnight nadir (-90 deg), 0.5 = horizon (0 deg), 1.0 = noon zenith (+90 deg)
             sunIntensityCurve = new AnimationCurve(
                 new Keyframe(0.0f, 0.0f, 0f, 0f),
-                new Keyframe(0.1f, 0.05f, 1f, 1f),
-                new Keyframe(0.5f, 1.0f, 0f, 0f),
-                new Keyframe(0.9f, 0.05f, -1f, -1f),
-                new Keyframe(1.0f, 0.0f, 0f, 0f)
+                new Keyframe(0.48f, 0.0f, 0f, 0f),
+                new Keyframe(0.52f, 0.10f, 1.5f, 1.5f),
+                new Keyframe(0.70f, 0.70f, 1.2f, 1.2f),
+                new Keyframe(1.0f, 1.0f, 0f, 0f)
             );
 
             moonIntensityCurve = new AnimationCurve(
                 new Keyframe(0.0f, 0.0f, 0f, 0f),
-                new Keyframe(0.15f, 0.1f, 1f, 1f),
-                new Keyframe(0.5f, 1.0f, 0f, 0f),
-                new Keyframe(0.85f, 0.1f, -1f, -1f),
-                new Keyframe(1.0f, 0.0f, 0f, 0f)
+                new Keyframe(0.48f, 0.0f, 0f, 0f),
+                new Keyframe(0.55f, 0.20f, 1.2f, 1.2f),
+                new Keyframe(1.0f, 1.0f, 0f, 0f)
             );
+        }
+
+        private void ValidateCurves()
+        {
+            // Automatically detect and recover legacy inverted curves where noon (1.0) evaluated to 0
+            if (sunIntensityCurve == null || sunIntensityCurve.keys.Length == 0 || sunIntensityCurve.Evaluate(1.0f) < 0.1f)
+            {
+                InitDefaultCurves();
+            }
+            if (moonIntensityCurve == null || moonIntensityCurve.keys.Length == 0 || moonIntensityCurve.Evaluate(1.0f) < 0.1f)
+            {
+                InitDefaultCurves();
+            }
         }
 
         public void AutoFindLights()
@@ -292,6 +301,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         private void OnValidate()
         {
+            ValidateCurves();
             ApplyCelestialCycle();
         }
 
@@ -315,14 +325,16 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
             else
             {
-                // Custom Artistic Mode: explicit pitch from time and compass yaw
-                float sunPitch = (timeOfDay + customSunOffset) * 15f;
-                Quaternion sunRot = Quaternion.Euler(sunPitch, customSunRotation, 0f);
-                sunDir = (sunRot * Vector3.forward).normalized;
+                // Custom Artistic Mode: East-to-West orbit passing zenith at 12:00
+                float sunAngleRad = ((timeOfDay + customSunOffset) / 24f * 360f - 90f) * Mathf.Deg2Rad;
+                Vector3 sunOrbitLocal = new Vector3(Mathf.Cos(sunAngleRad), Mathf.Sin(sunAngleRad), 0f);
+                Quaternion sunOrbitRot = Quaternion.Euler(latitude, customSunRotation, 0f);
+                sunDir = (sunOrbitRot * sunOrbitLocal).normalized;
 
-                float moonPitch = sunPitch - 180f;
-                Quaternion moonRot = Quaternion.Euler(moonPitch, customSunRotation + customMoonRotationOffset, 0f);
-                moonDir = (moonRot * Vector3.forward).normalized;
+                float moonAngleRad = ((timeOfDay + customSunOffset + 12f) / 24f * 360f - 90f) * Mathf.Deg2Rad;
+                Vector3 moonOrbitLocal = new Vector3(Mathf.Cos(moonAngleRad), Mathf.Sin(moonAngleRad), 0f);
+                Quaternion moonOrbitRot = Quaternion.Euler(latitude, customSunRotation + customMoonRotationOffset, 0f);
+                moonDir = (moonOrbitRot * moonOrbitLocal).normalized;
             }
 
             CurrentSunDirection = sunDir;

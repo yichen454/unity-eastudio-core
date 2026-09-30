@@ -5,6 +5,26 @@ All notable changes to the `com.eastudio.core` package will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-30
+
+### Added
+- **TimeOfDay (TOD) Architecture Overhaul**:
+  - `CelestialLightingMode`: Introduced `Single` (default) and `Dual` modes. Single mode dynamically redirects a single directional light between Sun and Moon, eliminating cascaded shadow map passes and additional light overhead in URP mobile/XR pipelines.
+  - `CelestialOrbitMode`: Added dual trajectory engines — `Realistic` (astronomical Keplerian/elevation equations with latitude and seasonal axial tilt) and `Custom` (artistic East-to-West polar orbit passing exact zenith at noon).
+  - Time progression modifiers: Added `dayLengthModifier` and `nightLengthModifier` for independent day and night speeds.
+  - Decoupled celestial metrics & events: Exposed `SolarTime` (0~1), `LunarTime` (0~1), `IsNight`, and lifecycle hooks `OnHourPassed`, `OnDayPassed`, and `OnDayNightTransition`.
+  - Celestial sphere matrix: Injected `_CelestialStarsMatrix` into global shaders for dynamic night sky rotation.
+
+### Fixed
+- **Moon Visual Geometry & Lunar Phase Decoupling**:
+  - Fixed an issue where single-light nighttime redirected light transforms caused `ProceduralSkyController` to mistake the moon for the sun, rendering a cyan solar disc at the moon location and displacing the moon underground.
+  - Decoupled physical visual sky directions (`CurrentSunDirection`, `CurrentMoonDirection`) from lighting tracking transforms.
+  - Re-anchored solar and lunar intensity curves to physical elevation scales, preventing noon blackout ($t=1.0 ightarrow 1.0$).
+  - Added self-healing `ValidateCurves()` to repair legacy inverted curves on `Awake`/`OnValidate`.
+  - Added parameter override defaults to `MoonSettings` VolumeComponent.
+
+---
+
 ## [0.2.0] - 2026-08-16
 
 ### Added
