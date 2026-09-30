@@ -51,6 +51,8 @@ namespace EAStudio.Core.RenderFeature.Sky
             {
                 m_Material = CoreUtils.CreateEngineMaterial(m_Shader);
                 m_Material.name = "Volume_HDRISky_Runtime";
+                m_Material.SetColor(s_TintID, new Color32(0x80, 0x80, 0x80, 0xFF));
+                m_Material.SetFloat(s_ExposureID, 1.0f);
             }
 
             return m_Material;
@@ -63,10 +65,10 @@ namespace EAStudio.Core.RenderFeature.Sky
 
             SkyVolumeBlendEvaluator.EvaluateHDRITransition(camera, hdriSky, out var cubemapA, out var cubemapB, out var blendWeight);
 
-            float rotation = hdriSky.rotation.value;
-            float exposure = hdriSky.exposure.value;
-            float lightingMultiplier = visualEnv.lightingMultiplier.value;
-            Color tint = hdriSky.tint.value;
+            float rotation = (hdriSky.rotation != null && hdriSky.rotation.overrideState) ? hdriSky.rotation.value : 0f;
+            float exposure = (hdriSky.exposure != null && hdriSky.exposure.overrideState) ? hdriSky.exposure.value : 1.0f;
+            float lightingMultiplier = (visualEnv.lightingMultiplier != null && visualEnv.lightingMultiplier.overrideState) ? visualEnv.lightingMultiplier.value : 1.0f;
+            Color tint = (hdriSky.tint != null && hdriSky.tint.overrideState) ? hdriSky.tint.value : new Color32(0x80, 0x80, 0x80, 0xFF);
             SkyAmbientMode ambientMode = visualEnv.skyAmbientMode.value;
 
             Material skyMat = EnsureMaterial();

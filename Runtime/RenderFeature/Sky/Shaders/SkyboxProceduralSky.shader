@@ -100,6 +100,9 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float _EnableMoon;
             CBUFFER_END
 
+            float4x4 _CelestialStarsMatrix;
+            float _UseCelestialStarsMatrix;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -363,7 +366,8 @@ Shader "Skybox/EAStudio/ProceduralSky"
 
                 if (_HasNightSkyMap > 0.5)
                 {
-                    float3 rotatedNightDir = RotateAroundY(o_rayDir, _NightRotation);
+                    float3 nightRayDir = (_UseCelestialStarsMatrix > 0.5) ? mul((float3x3)_CelestialStarsMatrix, o_rayDir) : o_rayDir;
+                    float3 rotatedNightDir = RotateAroundY(nightRayDir, _NightRotation);
                     float4 rawNightTex = SAMPLE_TEXTURECUBE_LOD(_NightSkyMap, sampler_LinearClamp, rotatedNightDir, 0);
                     float3 nightSkyHDR = DecodeHDREnvironment(rawNightTex, _NightSkyMap_HDR) * _NightExposure;
 

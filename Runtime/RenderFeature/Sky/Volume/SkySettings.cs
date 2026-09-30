@@ -19,7 +19,7 @@ namespace EAStudio.Core.RenderFeature.Sky
     public abstract class SkySettings : VolumeComponent
     {
         [Tooltip("天空盒线性曝光强度倍率（1.0 为正常，2.0 为两倍亮度）。")]
-        public MinFloatParameter exposure = new MinFloatParameter(1f, 0f);
+        public MinFloatParameter exposure = new MinFloatParameter(1f, 0f, true);
 
         [Tooltip("环境漫反射与反射同步更新模式。")]
         public EnvUpdateModeParameter updateMode = new EnvUpdateModeParameter(EnvUpdateMode.Realtime);

@@ -80,30 +80,46 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (visualEnv == null || proceduralSky == null)
                 return;
 
-            Light sun = CelestialLightManager.FindSunLight();
-            Light moonLight = CelestialLightManager.FindMoonLight();
-            if (moonLight == sun)
-                moonLight = null;
-
-            Vector3 sunDir = sun != null ? -sun.transform.forward : new Vector3(0f, 0.7071f, 0.7071f);
-            Color sunColor = (sun != null && sun.isActiveAndEnabled) ? (sun.color * sun.intensity) : Color.black;
-
-            bool enableMoon = moonSettings == null || moonSettings.enableMoon.value;
+            Vector3 sunDir;
             Vector3 moonDir;
-            if (moonLight != null)
+            Color sunColor;
+            Color moonLightColor;
+
+            TimeOfDay tod = TimeOfDay.Instance;
+            if (tod != null)
             {
-                moonDir = -moonLight.transform.forward;
-                CelestialLightManager.EnsureSeparated(sunDir, ref moonDir);
+                sunDir = tod.CurrentSunDirection;
+                moonDir = tod.CurrentMoonDirection;
+                sunColor = tod.CurrentSunRadiance;
+                moonLightColor = tod.CurrentMoonColor;
             }
             else
             {
-                moonDir = Vector3.Normalize(new Vector3(-sunDir.x, -sunDir.y * 0.95f + 0.12f, -sunDir.z));
+                Light sun = CelestialLightManager.FindSunLight();
+                Light moonLight = CelestialLightManager.FindMoonLight();
+                if (moonLight == sun)
+                    moonLight = null;
+
+                sunDir = sun != null ? -sun.transform.forward : new Vector3(0f, 0.7071f, 0.7071f);
+                sunColor = (sun != null && sun.isActiveAndEnabled) ? (sun.color * sun.intensity) : Color.black;
+
+                if (moonLight != null)
+                {
+                    moonDir = -moonLight.transform.forward;
+                    CelestialLightManager.EnsureSeparated(sunDir, ref moonDir);
+                    moonLightColor = (moonLight != null && moonLight.isActiveAndEnabled) ? moonLight.color : Color.white;
+                }
+                else
+                {
+                    moonDir = Vector3.Normalize(new Vector3(-sunDir.x, -sunDir.y * 0.95f + 0.12f, -sunDir.z));
+                    moonLightColor = Color.white;
+                }
             }
 
+            bool enableMoon = moonSettings == null || moonSettings.enableMoon.value;
             float moonSize = moonSettings != null ? moonSettings.moonSize.value : 0.06f;
             float moonBrightness = moonSettings != null ? moonSettings.moonBrightness.value : 1.2f;
             Color baseMoonColor = moonSettings != null ? moonSettings.moonColor.value : new Color(0.92f, 0.95f, 1f, 1f);
-            Color moonLightColor = (moonLight != null && moonLight.isActiveAndEnabled) ? moonLight.color : Color.white;
             Color moonColor = baseMoonColor * moonLightColor;
             float earthshine = moonSettings != null ? moonSettings.earthshine.value : 0.04f;
             float haloIntensity = moonSettings != null ? moonSettings.haloIntensity.value : 0.5f;

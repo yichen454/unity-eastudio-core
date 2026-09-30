@@ -54,6 +54,18 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("夜间月光穿透并照亮云层的散射强度系数。")]
         public ClampedFloatParameter cloudMoonlightIntensity = new ClampedFloatParameter(0.7f, 0.0f, 3.0f);
 
+        public MoonSettings()
+        {
+            enableMoon.overrideState = true;
+            moonSize.overrideState = true;
+            moonBrightness.overrideState = true;
+            moonColor.overrideState = true;
+            phaseMode.overrideState = true;
+            lunarPhase.overrideState = true;
+            earthshine.overrideState = true;
+            haloIntensity.overrideState = true;
+        }
+
         public virtual int GetParameterHashCode()
         {
             unchecked
