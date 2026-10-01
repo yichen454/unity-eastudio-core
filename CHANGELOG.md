@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **VisualEnvironment Decoupling**:
   - Removed global `windOrientation` and `windSpeed` parameters from `VisualEnvironment.cs`.
-- **Cloud Subsystem Wind Autonomy**:
-  - Transferred `windOrientation` and `windSpeed` parameters directly into `CloudSettings.cs` with default `overrideState = true` and hash tracking, allowing the cloud sub-system to manage its own wind dynamics independently.
+- **Cloud Subsystem Clean State**:
+  - Maintained `CloudSettings.cs` in a clean minimal slate (`enableClouds` and `downscale`), deferring cloud-specific wind modeling to the upcoming cloud redesign phase.
 
 ---
 
