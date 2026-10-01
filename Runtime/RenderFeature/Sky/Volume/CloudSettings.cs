@@ -26,19 +26,10 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("云层离屏渲染分辨率倍率：Full(1:1 全分辨率)、Half(1/2 半分辨率，推荐)、Quarter(1/4 四分之一分辨率)。")]
         public CloudDownscaleParameter downscale = new CloudDownscaleParameter(CloudDownscale.Half);
 
-        [Header("云层风场动力学 (Cloud Wind Dynamics)")]
-        [Tooltip("云层风向角度（0-360度，0为正东）。")]
-        public ClampedFloatParameter windOrientation = new ClampedFloatParameter(0f, 0f, 360f);
-
-        [Tooltip("云层漂移风速（米/秒），驱动云体三维位移与地表投影平移。")]
-        public MinFloatParameter windSpeed = new MinFloatParameter(5f, 0f);
-
         public CloudSettings()
         {
             enableClouds.overrideState = true;
             downscale.overrideState = true;
-            windOrientation.overrideState = true;
-            windSpeed.overrideState = true;
         }
 
         public virtual int GetParameterHashCode()
@@ -48,8 +39,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 int hash = 17;
                 hash = hash * 31 + enableClouds.value.GetHashCode();
                 hash = hash * 31 + downscale.value.GetHashCode();
-                hash = hash * 31 + windOrientation.value.GetHashCode();
-                hash = hash * 31 + windSpeed.value.GetHashCode();
                 return hash;
             }
         }
