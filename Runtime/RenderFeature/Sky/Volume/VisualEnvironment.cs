@@ -59,12 +59,5 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Header("云层系统 (Clouds)")]
         [Tooltip("云层渲染技术：None(关闭)、Layered(多层分层云)。")]
         public CloudTypeParameter cloudType = new CloudTypeParameter(CloudType.None);
-
-        [Header("风场设置 (Wind)")]
-        [Tooltip("全局风向角度（0-360度，0为正东）。")]
-        public ClampedFloatParameter windOrientation = new ClampedFloatParameter(0f, 0f, 360f);
-
-        [Tooltip("全局风速（米/秒），驱动云层与投影移动速度。")]
-        public MinFloatParameter windSpeed = new MinFloatParameter(5f, 0f);
     }
 }

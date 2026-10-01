@@ -5,6 +5,16 @@ All notable changes to the `com.eastudio.core` package will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-10-01
+
+### Changed
+- **VisualEnvironment Decoupling**:
+  - Removed global `windOrientation` and `windSpeed` parameters from `VisualEnvironment.cs`.
+- **Cloud Subsystem Wind Autonomy**:
+  - Transferred `windOrientation` and `windSpeed` parameters directly into `CloudSettings.cs` with default `overrideState = true` and hash tracking, allowing the cloud sub-system to manage its own wind dynamics independently.
+
+---
+
 ## [1.3.0] - 2026-09-30
 
 ### Added
@@ -19,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Moon Visual Geometry & Lunar Phase Decoupling**:
   - Fixed an issue where single-light nighttime redirected light transforms caused `ProceduralSkyController` to mistake the moon for the sun, rendering a cyan solar disc at the moon location and displacing the moon underground.
   - Decoupled physical visual sky directions (`CurrentSunDirection`, `CurrentMoonDirection`) from lighting tracking transforms.
-  - Re-anchored solar and lunar intensity curves to physical elevation scales, preventing noon blackout ($t=1.0 ightarrow 1.0$).
+  - Re-anchored solar and lunar intensity curves to physical elevation scales, preventing noon blackout ($t=1.0 \rightarrow 1.0$).
   - Added self-healing `ValidateCurves()` to repair legacy inverted curves on `Awake`/`OnValidate`.
   - Added parameter override defaults to `MoonSettings` VolumeComponent.
 
