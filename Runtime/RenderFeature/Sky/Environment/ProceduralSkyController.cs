@@ -10,6 +10,12 @@ namespace EAStudio.Core.RenderFeature.Sky
     {
         private const string k_ProceduralPath = "Skybox/EAStudio/ProceduralSky";
 
+        /// <summary>
+        /// Fibonacci-sphere sample count for the ambient probe projection. 512 samples resolve the horizon band and
+        /// the Mie forward lobe well past the precision that an SH-L2 probe can represent.
+        /// </summary>
+        private const int k_AmbientProjectionSamples = 512;
+
         private static readonly int s_ExposureID = Shader.PropertyToID("_Exposure");
         private static readonly int s_SunDirectionID = Shader.PropertyToID("_SunDirection");
         private static readonly int s_SunColorID = Shader.PropertyToID("_SunColor");
@@ -19,6 +25,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_AtmosphereThicknessID = Shader.PropertyToID("_AtmosphereThickness");
         private static readonly int s_OzoneAbsorptionID = Shader.PropertyToID("_OzoneAbsorption");
         private static readonly int s_AerosolHazeID = Shader.PropertyToID("_AerosolHaze");
+        private static readonly int s_SkyBrightnessID = Shader.PropertyToID("_SkyBrightness");
         private static readonly int s_GroundFadeID = Shader.PropertyToID("_GroundFade");
         private static readonly int s_SkyTintID = Shader.PropertyToID("_SkyTint");
         private static readonly int s_GroundColorID = Shader.PropertyToID("_GroundColor");
@@ -35,6 +42,13 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_MoonColorID = Shader.PropertyToID("_MoonColor");
         private static readonly int s_MoonTextureID = Shader.PropertyToID("_MoonTexture");
         private static readonly int s_EnableMoonID = Shader.PropertyToID("_EnableMoon");
+
+        /// <summary>
+        /// RGBM decode the controller forces onto the night HDRI material. It is the identity, so the shader treats the
+        /// sampled texel as radiance directly. The ambient probe projects with the very same vector, otherwise night
+        /// ambient would not match the sky on screen.
+        /// </summary>
+        private static readonly Vector4 k_NightSkyMapDecode = new Vector4(1f, 1f, 0f, 0f);
 
         private Shader m_ShaderOverride;
         private Shader m_Shader;
@@ -155,6 +169,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             float thickness = proceduralSky != null ? proceduralSky.atmosphereThickness.value : 1.0f;
             float ozone = proceduralSky != null ? proceduralSky.ozoneAbsorption.value : 1.0f;
             float aerosol = proceduralSky != null ? proceduralSky.aerosolHaze.value : 1.0f;
+            float skyBrightness = (proceduralSky != null && proceduralSky.skyBrightness != null) ? proceduralSky.skyBrightness.value : 1.0f;
             float groundFade = proceduralSky != null ? proceduralSky.groundFade.value : 0.25f;
             Color skyTint = proceduralSky != null ? proceduralSky.skyTint.value : new Color(0.5f, 0.5f, 0.5f, 1f);
             Color groundColor = proceduralSky != null ? proceduralSky.groundColor.value : new Color(0.369f, 0.349f, 0.341f, 1f);
@@ -176,6 +191,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 skyMat.SetFloat(s_AtmosphereThicknessID, thickness);
                 skyMat.SetFloat(s_OzoneAbsorptionID, ozone);
                 skyMat.SetFloat(s_AerosolHazeID, aerosol);
+                skyMat.SetFloat(s_SkyBrightnessID, skyBrightness);
                 skyMat.SetFloat(s_GroundFadeID, groundFade);
                 skyMat.SetColor(s_SkyTintID, skyTint);
                 skyMat.SetColor(s_GroundColorID, groundColor);
@@ -193,7 +209,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 if (nightSkyMap != null)
                 {
                     skyMat.SetTexture(s_NightSkyMapID, nightSkyMap);
-                    skyMat.SetVector(s_NightSkyMapHDRID, new Vector4(1f, 1f, 0f, 0f));
+                    skyMat.SetVector(s_NightSkyMapHDRID, k_NightSkyMapDecode);
                     skyMat.SetFloat(s_NightExposureID, nightExposure);
                     skyMat.SetFloat(s_NightRotationID, nightRotation);
                     skyMat.SetFloat(s_HasNightSkyMapID, 1.0f);
@@ -218,6 +234,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + thickness.GetHashCode();
                 hash = hash * 31 + ozone.GetHashCode();
                 hash = hash * 31 + aerosol.GetHashCode();
+                hash = hash * 31 + skyBrightness.GetHashCode();
                 hash = hash * 31 + groundFade.GetHashCode();
                 hash = hash * 31 + skyTint.GetHashCode();
                 hash = hash * 31 + groundColor.GetHashCode();
@@ -230,6 +247,8 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + phaseVal.GetHashCode();
                 hash = hash * 31 + moonSize.GetHashCode();
                 hash = hash * 31 + moonBrightness.GetHashCode();
+                hash = hash * 31 + moonColor.GetHashCode();
+                hash = hash * 31 + haloIntensity.GetHashCode();
                 hash = hash * 31 + exposure.GetHashCode();
                 hash = hash * 31 + lightingMultiplier.GetHashCode();
                 hash = hash * 31 + ((int)ambientMode).GetHashCode();
@@ -245,46 +264,58 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (ambientMode == SkyAmbientMode.Off)
                 return;
 
-            float ly = sunDir.y + Mathf.Clamp01(-sunDir.y + 0.02f) * Mathf.Clamp01(sunDir.y + 0.7f);
-            ly = Mathf.Clamp(ly, -1f, 1f);
+            // Ambient probe: project the very same dome model the shader renders, so the scene is lit by the sky the
+            // player actually sees. skyBrightness and exposure are part of that model and therefore already folded in.
+            // lightingMultiplier is deliberately NOT folded in here: RenderSettings.ambientIntensity already scales a
+            // Skybox ambient probe, so applying it on both would square the multiplier.
+            ProceduralSkyRadiance dome = new ProceduralSkyRadiance
+            {
+                sunDirection = sunDir,
+                atmosphereThickness = thickness,
+                aerosolHaze = aerosol,
+                ozoneAbsorption = ozone,
+                skyBrightness = skyBrightness,
+                sunBrightness = sunBrightness,
+                sunSize = sunSize,
+                sunConvergence = sunConvergence,
+                skyTint = skyTint,
+                groundColor = groundColor,
+                nightSkyColor = nightSkyColor,
+                sunColor = sunColor,
+                groundFade = groundFade,
+                exposure = exposure,
+                hasNightSkyMap = nightSkyMap != null,
+                enableMoon = enableMoon,
+                moonDirection = moonDir,
+                moonColor = moonColor,
+                moonHaloIntensity = haloIntensity,
+            };
 
-            float totalDensity = thickness * aerosol;
-            float lightExtinction = Mathf.Exp(-Mathf.Clamp01(ly + 0.05f) * 40f) +
-                                    Mathf.Exp(-Mathf.Clamp01(ly + 0.5f) * 5f) * 0.4f +
-                                    Mathf.Pow(Mathf.Clamp01(1f - ly), 2f) * 0.02f + 0.002f;
+            SphericalHarmonicsL2 baseSH = dome.ProjectAmbient(k_AmbientProjectionSamples);
 
-            Color sunTrans = new Color(
-                Mathf.Exp(-(5.8e-6f + 3.996e-6f + 0.65e-6f * 5f * ozone) * lightExtinction * totalDensity * 1e6f),
-                Mathf.Exp(-(13.5e-6f + 3.996e-6f + 1.88e-6f * 5f * ozone) * lightExtinction * totalDensity * 1e6f),
-                Mathf.Exp(-(33.1e-6f + 3.996e-6f + 0.085e-6f * 5f * ozone) * lightExtinction * totalDensity * 1e6f)
-            );
-
-            Color transmittedSun = sunColor * sunTrans;
-            float sunLum = Mathf.Max(sunColor.r, Mathf.Max(sunColor.g, sunColor.b));
-            Color zenith = skyTint * new Color(0.18f, 0.45f, 1.0f) * thickness * 1.5f * Mathf.Clamp01((sunDir.y + 0.25f) / 0.4f) * sunLum;
-            Color horizon = transmittedSun * 1.2f + new Color(0.02f, 0.03f, 0.05f) * Mathf.Clamp01(sunLum * 0.5f + 0.5f);
-            Color ground = groundColor * (Mathf.Clamp01(sunDir.y * 2f + 0.2f) * 0.6f + 0.1f) * Mathf.Clamp01(sunLum * 0.8f + 0.2f);
-
-            SphericalHarmonicsL2 baseSH = SphericalHarmonicsUtils.FromTrilight(zenith, horizon, ground);
-
-            float nightWeight = Mathf.Clamp01((0.04f - sunDir.y) / 0.24f);
+            // Same night ramp the shader applies (smoothstep over the lifted solar elevation), so the probe hands over
+            // from the dome to the night HDRI exactly when the visible sky does.
+            float nightWeight = ProceduralSkyRadiance.NightWeight(sunDir);
             if (nightSkyMap != null && nightWeight > 0.001f)
             {
-                if (SphericalHarmonicsUtils.ExtractFromCubemap(nightSkyMap, out var nightSH))
+                if (SphericalHarmonicsUtils.ExtractFromCubemap(nightSkyMap, k_NightSkyMapDecode, out var nightSH))
                 {
+                    // RotateAroundY in the shader samples along R_y(-_NightRotation), so the visible environment is the
+                    // cubemap turned by +_NightRotation.
                     if (Mathf.Abs(nightRotation) > 0.01f)
                     {
                         nightSH = SphericalHarmonicsUtils.RotateY(nightSH, nightRotation);
                     }
-                    nightSH = SphericalHarmonicsUtils.Scale(nightSH, nightExposure);
+
+                    // The shader blends the night HDRI in *before* it tints everything with `_SkyTint.rgb * 2.0`, so the
+                    // night probe carries the same tint the daytime dome already has.
+                    nightSH = SphericalHarmonicsUtils.Scale(nightSH, ProceduralSkyRadiance.SkyTintFactor(skyTint) * nightExposure);
                     baseSH = SphericalHarmonicsUtils.Lerp(baseSH, nightSH, nightWeight);
                 }
             }
 
-            SphericalHarmonicsL2 finalSH = SphericalHarmonicsUtils.Scale(baseSH, lightingMultiplier);
-
             RenderSettings.ambientMode = AmbientMode.Skybox;
-            RenderSettings.ambientProbe = finalSH;
+            RenderSettings.ambientProbe = baseSH;
             RenderSettings.ambientIntensity = lightingMultiplier;
 
 

@@ -27,6 +27,9 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("地平线附近气溶胶（水汽、灰尘）雾霾散射密度。")]
         public ClampedFloatParameter aerosolHaze = new ClampedFloatParameter(1.0f, 0.1f, 5.0f);
 
+        [Tooltip("穹顶大气散射整体亮度倍率。1.0 为物理基准值；调低可压暗天穹，调高可提亮天穹。同步缩放环境光探针，使场景环境照明与天穹亮度一致（不影响太阳本体、月亮与夜空 HDRI）。")]
+        public MinFloatParameter skyBrightness = new MinFloatParameter(1.0f, 0.0f);
+
         [Header("色彩与地表过渡 (Colors & Transitions)")]
         [Tooltip("天穹整体色调偏向调节。")]
         public ColorParameter skyTint = new ColorParameter(new Color(0.5f, 0.5f, 0.5f, 1f), false, false, true);
@@ -61,6 +64,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + atmosphereThickness.value.GetHashCode();
                 hash = hash * 31 + ozoneAbsorption.value.GetHashCode();
                 hash = hash * 31 + aerosolHaze.value.GetHashCode();
+                hash = hash * 31 + skyBrightness.value.GetHashCode();
                 hash = hash * 31 + skyTint.value.GetHashCode();
                 hash = hash * 31 + groundColor.value.GetHashCode();
                 hash = hash * 31 + groundFade.value.GetHashCode();

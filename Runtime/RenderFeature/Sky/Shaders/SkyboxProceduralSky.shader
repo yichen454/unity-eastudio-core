@@ -3,6 +3,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
     Properties
     {
         [Gamma] _Exposure ("Exposure", Float) = 1.0
+        [HideInInspector] _SkyBrightness ("Sky Brightness", Float) = 1.0
 
         _SunSize ("Sun Size", Range(0.001, 0.2)) = 0.04
         _SunConvergence ("Sun Halo Convergence", Range(1.0, 30.0)) = 8.0
@@ -69,7 +70,6 @@ Shader "Skybox/EAStudio/ProceduralSky"
             TEXTURE2D(_CloudTexture);
             TEXTURECUBE(_NightSkyMap);
             SAMPLER(sampler_NightSkyMap);
-            float4 _NightSkyMap_HDR;
             TEXTURE2D(_MoonTexture);
             SAMPLER(sampler_MoonTexture);
 
@@ -87,6 +87,8 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float4 _SunDirection;
                 float4 _SunColor;
                 float _SunBrightness;
+                float _SkyBrightness;
+                float4 _NightSkyMap_HDR;
 
                 float _NightExposure;
                 float _NightRotation;
@@ -140,6 +142,12 @@ Shader "Skybox/EAStudio/ProceduralSky"
             #define M_MIE            float3(0.95, 0.85, 0.75)
             #define M_OZONE2         5.0
             #define M_DENSITY_HEIGHT_MOD 1e-12
+
+            // Solar irradiance scale feeding the dome scatter source. Deliberately constant (cf. Unity's built-in
+            // kSUN_BRIGHTNESS): the spectral transmittance above already carries the day/night falloff, so the dome
+            // must not inherit the artistic light-intensity ramp a second time — doing so crushes the low-sun dome
+            // to black. Sun disc and corona keep using _SunColor for their own radiance.
+            #define SKY_SOLAR_IRRADIANCE 3.0
 
             static const float kPlanetRadius = 6371000.0;
             static const float kAtmosphereHeight = 100000.0;
@@ -276,19 +284,32 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 M = (1.0 - exp(-opticalDepth * densityM * C_MIE / MIE_MAX_LUM)) * MIE_MAX_LUM;
             }
 
-            // Direct solar transmittance through atmosphere (computes extinction and sunset reddening with density & ozone control)
-            float3 GetAtmosphereSunTransmittance(float3 lightDir, float density, float multiplier, float ozoneMultiplier)
+            // Lifted elevation of a celestial body, used for the night transition and for the atmospheric
+            // transmittance. Below the horizon the raw elevation is lifted so the terminator band does not collapse
+            // onto the horizon line. Mirrors ProceduralSkyRadiance.AdjustedLightY.
+            float AdjustedLightY(float3 lightDir)
             {
-                // Physical optical path length:
-                // At high solar elevation, atmospheric optical depth is directly proportional to density (absorbing direct sunlight).
-                // Near the horizon (lightDir.y -> 0), optical path length surges up to 35x, creating vivid golden-red sunset reddening.
-                float zenithExtinction = 0.025 / max(lightDir.y + 0.1, 0.1);
-                float sunsetExtinction = exp(-(saturate(lightDir.y + 0.05) * 40.0)) +
-                    exp(-(saturate(lightDir.y + 0.5) * 5.0)) * 0.4 +
-                    pow(saturate(1.0 - lightDir.y), 2.0) * 0.02;
-                float lightExtinctionAmount = zenithExtinction + sunsetExtinction;
+                float y = lightDir.y;
+                return clamp(y + saturate(-y + 0.02) * saturate(y + 0.7), -1.0, 1.0);
+            }
 
-                return exp(-(C_RAYLEIGH + C_MIE + C_OZONE * ozoneMultiplier) * lightExtinctionAmount * density * multiplier * 1e6);
+            // Direct atmospheric transmittance along a celestial body direction (sun and moon share it).
+            // Reference model: Norex Fast Sky 2 (GetLightTransmittance). The relative air mass grows sharply as the
+            // body sinks, which is what reddens the beam near the horizon. Keep this the ONLY reddening term: the
+            // wavelength-dependent C_RAYLEIGH/C_OZONE coefficients do the tinting on their own.
+            float3 GetAtmosphereTransmittance(float3 lightDir, float thickness, float haze, float multiplier, float ozoneMultiplier)
+            {
+                float lightExtinctionAmount =
+                    exp(-(saturate(lightDir.y + 0.05) * 40.0)) +
+                    exp(-(saturate(lightDir.y + 0.5) * 5.0)) * 0.4 +
+                    pow(saturate(1.0 - lightDir.y), 2.0) * 0.02 +
+                    0.002;
+
+                // Rayleigh and ozone scale with atmosphere thickness only; Mie scales with aerosol haze.
+                float3 extinctionCoeff = C_RAYLEIGH * thickness
+                    + C_MIE * thickness * haze
+                    + C_OZONE * ozoneMultiplier * thickness;
+                return exp(-extinctionCoeff * lightExtinctionAmount * multiplier * 1e6);
             }
 
             half4 Frag(Varyings input) : SV_Target
@@ -318,7 +339,8 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 else
                     lightDir = lightDir * rsqrt(lenSq);
 
-                float density = max(_AtmosphereThickness, 0.0) * max(_AerosolHaze, 0.05);
+                float thickness = max(_AtmosphereThickness, 0.0);
+                float haze = max(_AerosolHaze, 0.0);
                 float sunSize = max(_SunSize, 0.0);
                 float convergence = clamp(_SunConvergence, 1.0, 30.0);
                 float ozone = max(_OzoneAbsorption, 0.0);
@@ -333,16 +355,17 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 // Height density
                 float hbias = 1.0 - 1.0 / (2.0 + pow(t2.y, 2.0) * M_DENSITY_HEIGHT_MOD);
                 float sqhbias = hbias * hbias;
-                float densityR = sqhbias * density;
-                float densityM = sqhbias * sqhbias * hbias * max(_AerosolHaze, 0.1);
+                float densityR = sqhbias * thickness;
+                float densityM = sqhbias * sqhbias * hbias * thickness * haze;
 
-                // Sunset transmission: modulated directly by _SunColor (carrying Light color * intensity)
-                float adjLightY = lightDir.y;
-                float ly = adjLightY;
-                ly += saturate(-adjLightY + 0.02) * saturate(adjLightY + 0.7);
-                ly = clamp(ly, -1.0, 1.0);
-                float3 sunTransmittance = GetAtmosphereSunTransmittance(float3(lightDir.x, ly, lightDir.z), density, hbias, M_OZONE2 * ozone);
-                float3 lightColor = sunTransmittance * _SunColor.rgb;
+                // Sunset transmission: spectral extinction along the sun direction. This IS the reddening term.
+                float adjLightY = AdjustedLightY(lightDir);
+                float3 sunTransmittance = GetAtmosphereTransmittance(float3(lightDir.x, adjLightY, lightDir.z), thickness, haze, hbias, M_OZONE2 * ozone);
+
+                // Scatter source: purely atmospheric — constant solar energy tinted by the spectral transmittance.
+                // Feeding the tinted Light color in here instead would redden and darken the dome twice (once by
+                // the light gradient, once by the transmittance above), which is what blackened the sky.
+                float3 lightColor = sunTransmittance * SKY_SOLAR_IRRADIANCE;
 
                 // Atmospheric Rayleigh & Mie scattering
                 float3 R, M;
@@ -353,13 +376,14 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float phaseM = PhaseM(costh, 0.88) * smoothstep(-0.35, -0.2, o_rayDir.y);
 
                 float sunBrightness = max(_SunBrightness, 0.0);
+                float skyBrightness = max(_SkyBrightness, 0.0);
 
                 // Forward Mie aerosol scattering: scale the intense forward solar glare hotspot by sunBrightness!
                 // When sunBrightness = 0, the bright forward glare spot is completely removed, leaving smooth diffuse sky!
                 float forwardMie = 1.0 + (phaseM - 1.0) * sunBrightness;
                 float3 rayleigh = (phaseR + phaseR * M_FAKE_MS) * lightColor + NIGHT_LIGHT * phaseR;
                 float3 mie = ((forwardMie + phaseR * M_FAKE_MS) * lightColor * sunBrightness + NIGHT_LIGHT * phaseR) * M_MIE;
-                float3 scattering = mie * M + rayleigh * R;
+                float3 scattering = (mie * M + rayleigh * R) * skyBrightness;
 
                 // Night sky transition: fades in as sun descends below horizon
                 float nightWeight = smoothstep(0.04, -0.20, adjLightY);
@@ -394,6 +418,16 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float4 moonData = CalcMoon(o_rayDir);
                 float3 moonFinal = moonData.rgb;
                 float moonMask = moonData.a;
+
+                // The moon rises and sets through the same atmosphere as the sun, so it carries the same spectral
+                // transmittance and the same horizon fade. Without them the moon pops to full brightness the moment
+                // its disc clears the skyline, while the sun gets a smooth (and reddened) rise and set.
+                float3 moonDir = _MoonDirection.xyz;
+                moonDir *= rsqrt(max(dot(moonDir, moonDir), 1e-6));
+                float3 moonTransmittance = GetAtmosphereTransmittance(
+                    float3(moonDir.x, AdjustedLightY(moonDir), moonDir.z), thickness, haze, hbias, M_OZONE2 * ozone);
+                float moonHorizonFade = saturate(1.0 - groundBlend * 2.0);
+                moonFinal *= saturate(moonTransmittance) * moonHorizonFade;
 
                 // --- Crisp Sun Shape & Tight Coronal Halo (Deep Space) ---
                 float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);

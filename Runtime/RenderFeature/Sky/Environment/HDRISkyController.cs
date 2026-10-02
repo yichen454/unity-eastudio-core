@@ -17,6 +17,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_ExposureID = Shader.PropertyToID("_Exposure");
         private static readonly int s_TintID = Shader.PropertyToID("_Tint");
         private static readonly int s_HasCloudsID = Shader.PropertyToID("_HasClouds");
+        private static readonly int s_TexHDRID = Shader.PropertyToID("_Tex_HDR");
+        private static readonly int s_TexBHDRID = Shader.PropertyToID("_TexB_HDR");
 
         private Shader m_ShaderOverride;
         private Shader m_Shader;
@@ -71,6 +73,9 @@ namespace EAStudio.Core.RenderFeature.Sky
             Color tint = (hdriSky.tint != null && hdriSky.tint.overrideState) ? hdriSky.tint.value : new Color32(0x80, 0x80, 0x80, 0xFF);
             SkyAmbientMode ambientMode = visualEnv.skyAmbientMode.value;
 
+            Vector4 decodeA = Vector4.zero;
+            Vector4 decodeB = Vector4.zero;
+
             Material skyMat = EnsureMaterial();
             if (skyMat != null)
             {
@@ -81,6 +86,11 @@ namespace EAStudio.Core.RenderFeature.Sky
                 skyMat.SetFloat(s_ExposureID, exposure);
                 skyMat.SetColor(s_TintID, tint);
                 skyMat.SetFloat(s_HasCloudsID, hasClouds ? 1.0f : 0.0f);
+
+                // Assigning a cubemap makes Unity fill in the matching RGBM decode vector (it differs per texture
+                // format). Reading it back keeps the CPU projection on the very decode the shader samples with.
+                decodeA = skyMat.GetVector(s_TexHDRID);
+                decodeB = skyMat.GetVector(s_TexBHDRID);
 
                 SkyboxMaterialManager.ApplySkybox(skyMat);
             }
@@ -109,26 +119,41 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (ambientMode == SkyAmbientMode.Off)
                 return;
 
-            float lightingIntensity = lightingMultiplier;
-            if (SphericalHarmonicsUtils.ExtractFromCubemap(cubemapA, out var baseSHA))
+            if (SphericalHarmonicsUtils.ExtractFromCubemap(cubemapA, decodeA, out var baseSHA))
             {
                 SphericalHarmonicsL2 blendedBaseSH = baseSHA;
 
-                if (blendWeight > 0.001f && cubemapB != null && cubemapA != cubemapB && SphericalHarmonicsUtils.ExtractFromCubemap(cubemapB, out var baseSHB))
+                if (blendWeight > 0.001f && cubemapB != null && cubemapA != cubemapB
+                    && SphericalHarmonicsUtils.ExtractFromCubemap(cubemapB, decodeB, out var baseSHB))
                 {
                     blendedBaseSH = SphericalHarmonicsUtils.Lerp(baseSHA, baseSHB, blendWeight);
                 }
 
-                SphericalHarmonicsL2 rotatedSH = SphericalHarmonicsUtils.RotateY(blendedBaseSH, -rotation);
-                Color effectiveTint = tint * 2.0f;
-                SphericalHarmonicsL2 finalSH = SphericalHarmonicsUtils.Scale(rotatedSH, effectiveTint, lightingIntensity);
+                // Rebuild in probe space what the skybox shader puts on screen: rotate by -_Rotation (the shader samples
+                // the cubemap along R_y(+_Rotation)), then apply the tint and the gamma-decoded exposure. The probe has
+                // to carry the same numbers as the visible sky or the scene is lit by a sky that is not there.
+                // lightingMultiplier is deliberately NOT folded in: RenderSettings.ambientIntensity already scales a
+                // Skybox ambient probe, so applying it here as well would square it.
+                SphericalHarmonicsL2 finalSH = SphericalHarmonicsUtils.Scale(
+                    SphericalHarmonicsUtils.RotateY(blendedBaseSH, -rotation),
+                    SkyTintFactor(tint) * SphericalHarmonicsUtils.DecodeGamma(exposure));
 
                 RenderSettings.ambientMode = AmbientMode.Skybox;
                 RenderSettings.ambientProbe = finalSH;
             }
-            RenderSettings.ambientIntensity = lightingIntensity;
 
+            RenderSettings.ambientIntensity = lightingMultiplier;
+        }
 
+        /// <summary>
+        /// Linear factor of the skybox shader's <c>col * _Tint.rgb * unity_ColorSpaceDouble.rgb</c>. <c>_Tint</c> is a
+        /// Color property, so the material uploads it gamma-decoded, and <c>unity_ColorSpaceDouble</c> is what makes
+        /// the default 50% grey a neutral 1.0 instead of 0.5.
+        /// </summary>
+        private static Vector3 SkyTintFactor(Color tint)
+        {
+            return SphericalHarmonicsUtils.DecodeGamma(tint)
+                * (SphericalHarmonicsUtils.LinearColorSpace ? 4.59479380f : 2f);
         }
 
         public void ResetState()
