@@ -21,7 +21,7 @@ namespace EAStudio.Core.RenderFeature.Sky
     public enum CloudType
     {
         None = 0,
-        Layered = 1,
+        CloudLayer = 1,
         Volumetric = 2
     }
 
@@ -57,7 +57,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         public MinFloatParameter lightingMultiplier = new MinFloatParameter(1f, 0f);
 
         [Header("云层系统 (Clouds)")]
-        [Tooltip("云层渲染技术：None(关闭)、Layered(多层分层云)。")]
+        [Tooltip("云层渲染技术：None(关闭)、CloudLayer(分层云 / Cloud Layer)。")]
         public CloudTypeParameter cloudType = new CloudTypeParameter(CloudType.None);
     }
 }

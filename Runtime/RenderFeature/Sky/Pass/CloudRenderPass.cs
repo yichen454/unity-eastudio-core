@@ -73,12 +73,12 @@ namespace EAStudio.Core.RenderFeature.Sky
             return m_GeneratorMaterial != null;
         }
 
-        public void Setup(VisualEnvironment visualEnv, CloudSettings cloudSettings)
+        public void Setup(VisualEnvironment visualEnv, CloudLayer cloudLayer)
         {
-            if (!EnsureMaterial() || visualEnv == null || cloudSettings == null)
+            if (!EnsureMaterial() || visualEnv == null || cloudLayer == null)
                 return;
 
-            m_DownscaleFactor = Mathf.Max(1, (int)cloudSettings.downscale.value);
+            m_DownscaleFactor = Mathf.Max(1, (int)cloudLayer.downscale.value);
         }
 
         public class LowResPass : ScriptableRenderPass

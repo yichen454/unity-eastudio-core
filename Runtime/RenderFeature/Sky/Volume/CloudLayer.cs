@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Scripting.APIUpdating;
 
 namespace EAStudio.Core.RenderFeature.Sky
 {
@@ -17,16 +18,17 @@ namespace EAStudio.Core.RenderFeature.Sky
         public CloudDownscaleParameter(CloudDownscale value, bool overrideState = false) : base(value, overrideState) { }
     }
 
-    [Serializable, VolumeComponentMenu("Sky/Cloud Settings")]
-    public class CloudSettings : VolumeComponent
+    [Serializable, VolumeComponentMenu("Sky/Cloud Layer")]
+    [MovedFrom(true, "EAStudio.Core.RenderFeature.Sky", "EAStudio.Core.Runtime", "CloudSettings")]
+    public class CloudLayer : VolumeComponent
     {
-        [Tooltip("是否启用云层渲染。")]
+        [Tooltip("是否启用分层云渲染。")]
         public BoolParameter enableClouds = new BoolParameter(true);
 
         [Tooltip("云层离屏渲染分辨率倍率：Full(1:1 全分辨率)、Half(1/2 半分辨率，推荐)、Quarter(1/4 四分之一分辨率)。")]
         public CloudDownscaleParameter downscale = new CloudDownscaleParameter(CloudDownscale.Half);
 
-        public CloudSettings()
+        public CloudLayer()
         {
             enableClouds.overrideState = true;
             downscale.overrideState = true;

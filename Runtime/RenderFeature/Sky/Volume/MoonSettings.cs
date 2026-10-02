@@ -50,9 +50,6 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("可选自定义月球表面 2D 贴图。未指定时默认使用内置 NASA 高清月面贴图。")]
         public TextureParameter customMoonTexture = new TextureParameter(null);
 
-        [Header("云层月光照度 (Cloud Moonlight)")]
-        [Tooltip("夜间月光穿透并照亮云层的散射强度系数。")]
-        public ClampedFloatParameter cloudMoonlightIntensity = new ClampedFloatParameter(0.7f, 0.0f, 3.0f);
 
         public MoonSettings()
         {
@@ -80,7 +77,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + earthshine.value.GetHashCode();
                 hash = hash * 31 + haloIntensity.value.GetHashCode();
                 hash = hash * 31 + (customMoonTexture.value != null ? customMoonTexture.value.GetInstanceID() : 0);
-                hash = hash * 31 + cloudMoonlightIntensity.value.GetHashCode();
                 return hash;
             }
         }

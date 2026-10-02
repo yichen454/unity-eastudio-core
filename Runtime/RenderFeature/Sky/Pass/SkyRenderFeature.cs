@@ -78,8 +78,8 @@ namespace EAStudio.Core.RenderFeature.Sky
 
             ProceduralSky proceduralSky = null;
             MoonSettings moonSettings = stack.GetComponent<MoonSettings>();
-            CloudSettings cloudSettings = (visualEnv.cloudType.value != CloudType.None) ? stack.GetComponent<CloudSettings>() : null;
-            bool hasActiveClouds = cloudSettings != null && cloudSettings.enableClouds.value;
+            CloudLayer cloudLayer = (visualEnv.cloudType.value == CloudType.CloudLayer) ? stack.GetComponent<CloudLayer>() : null;
+            bool hasActiveClouds = cloudLayer != null && cloudLayer.enableClouds.value;
 
             EnsureShaders();
             SkyEnvironmentSync.SetShaderOverrides(m_Shaders?.hdriSkyShader, m_Shaders?.proceduralSkyShader);
@@ -108,11 +108,11 @@ namespace EAStudio.Core.RenderFeature.Sky
             }
 
             // 2. Cloud layer: Downscaled offscreen pass
-            if (visualEnv.cloudType.value != CloudType.None && m_CloudRenderPass != null)
+            if (visualEnv.cloudType.value == CloudType.CloudLayer && m_CloudRenderPass != null)
             {
                 if (hasActiveClouds)
                 {
-                    m_CloudRenderPass.Setup(visualEnv, cloudSettings);
+                    m_CloudRenderPass.Setup(visualEnv, cloudLayer);
                     renderer.EnqueuePass(m_CloudRenderPass.LowRes);
                 }
                 else
