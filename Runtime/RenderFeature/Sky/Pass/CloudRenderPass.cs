@@ -302,7 +302,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
                 TextureDesc textureDesc = new TextureDesc(desc.width, desc.height)
                 {
-                    colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                    colorFormat = GraphicsFormat.R8G8B8A8_SRGB,
                     depthBufferBits = 0,
                     msaaSamples = MSAASamples.None,
                     filterMode = FilterMode.Bilinear,
