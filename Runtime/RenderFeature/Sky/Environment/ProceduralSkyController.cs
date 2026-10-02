@@ -42,6 +42,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_MoonColorID = Shader.PropertyToID("_MoonColor");
         private static readonly int s_MoonTextureID = Shader.PropertyToID("_MoonTexture");
         private static readonly int s_EnableMoonID = Shader.PropertyToID("_EnableMoon");
+        private static readonly int s_MoonRiseFadeID = Shader.PropertyToID("_MoonRiseFade");
 
         /// <summary>
         /// RGBM decode the controller forces onto the night HDRI material. It is the identity, so the shader treats the
@@ -137,6 +138,10 @@ namespace EAStudio.Core.RenderFeature.Sky
             Color moonColor = baseMoonColor * moonLightColor;
             float earthshine = moonSettings != null ? moonSettings.earthshine.value : 0.04f;
             float haloIntensity = moonSettings != null ? moonSettings.haloIntensity.value : 0.5f;
+            float riseFade = moonSettings != null ? moonSettings.riseFade.value : 10.0f;
+            // Authored in degrees of the moon's own elevation, like the cloud layer's horizon band; the shader
+            // compares it against AdjustedLightY(moonDir), i.e. sin(elevation) above the skyline.
+            float moonRiseFade = Mathf.Sin(Mathf.Clamp(riseFade, 0f, 90f) * Mathf.Deg2Rad);
 
             Vector3 upRef = Mathf.Abs(moonDir.y) > 0.99f ? Vector3.forward : Vector3.up;
             Vector3 moonRight = Vector3.Normalize(Vector3.Cross(upRef, moonDir));
@@ -205,6 +210,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 skyMat.SetColor(s_MoonColorID, moonColor);
                 skyMat.SetTexture(s_MoonTextureID, moonTex != null ? moonTex : Texture2D.whiteTexture);
                 skyMat.SetFloat(s_EnableMoonID, enableMoon ? 1.0f : 0.0f);
+                skyMat.SetFloat(s_MoonRiseFadeID, moonRiseFade);
 
                 if (nightSkyMap != null)
                 {
@@ -249,6 +255,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + moonBrightness.GetHashCode();
                 hash = hash * 31 + moonColor.GetHashCode();
                 hash = hash * 31 + haloIntensity.GetHashCode();
+                hash = hash * 31 + riseFade.GetHashCode();
                 hash = hash * 31 + exposure.GetHashCode();
                 hash = hash * 31 + lightingMultiplier.GetHashCode();
                 hash = hash * 31 + ((int)ambientMode).GetHashCode();
@@ -289,6 +296,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 moonDirection = moonDir,
                 moonColor = moonColor,
                 moonHaloIntensity = haloIntensity,
+                moonRiseFade = moonRiseFade,
             };
 
             SphericalHarmonicsL2 baseSH = dome.ProjectAmbient(k_AmbientProjectionSamples);

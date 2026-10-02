@@ -394,7 +394,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             // 4. Lighting Execution based on LightingMode
             if (lightingMode == CelestialLightingMode.Single)
             {
-                ApplySingleLighting(sunDir, moonDir, sunCurrentIntensity, moonCurrentIntensity, evaluatedSunColor, evaluatedMoonColor, sunActive, moonActive);
+                ApplySingleLighting(sunDir, moonDir, sunCurrentIntensity, moonCurrentIntensity, evaluatedSunColor, evaluatedMoonColor, sunActive, moonActive, moonNightMask);
             }
             else
             {
@@ -409,36 +409,38 @@ namespace EAStudio.Core.RenderFeature.Sky
             Vector3 sunDir, Vector3 moonDir,
             float sunCurrentIntensity, float moonCurrentIntensity,
             Color evaluatedSunColor, Color evaluatedMoonColor,
-            bool sunActive, bool moonActive)
+            bool sunActive, bool moonActive, float moonNightMask)
         {
+            // One directional light cannot point at the sun and the moon at the same time, so the changeover is
+            // a fade *through zero*: the key light dims to nothing, swaps direction and colour, then comes back
+            // up. The swap is then invisible, because it happens where nothing is lit. A bare `IsNight` test
+            // instead teleported the light 173 degrees and jumped its colour from the sunset ember to the moon's
+            // white between two frames (measured at 19:02 against the default curve: forward turned from
+            // (0.886, 0.006, -0.464) to (-0.877, -0.129, 0.462) and the colour from (1.00, 0.25, 0.08) to
+            // (1, 1, 1)), which reads as the moon being switched on rather than rising.
+            // The fade rides on `moonNightMask`, the weight the moon's own intensity already uses: it is 0 while
+            // the sun is up and 1 once night has fallen, so no second ramp is introduced. Both bodies are near
+            // zero inside the band anyway -- the sun's curve has run out and the moon's mask has not opened yet --
+            // so the dip costs almost no light.
+            float handover = Mathf.Abs(moonNightMask * 2f - 1f);
+            bool moonOwns = moonNightMask >= 0.5f;
+
             // In Single Light mode, sunLight acts as the unified celestial main directional light.
             if (sunLight != null)
             {
-                if (!IsNight)
-                {
-                    // Day phase: track Sun
-                    sunLight.transform.forward = -sunDir;
-                    sunLight.intensity = sunCurrentIntensity;
-                    sunLight.color = evaluatedSunColor;
-                    sunLight.enabled = sunActive;
+                Vector3 bodyDir = moonOwns ? moonDir : sunDir;
+                Color bodyColor = moonOwns ? evaluatedMoonColor : evaluatedSunColor;
+                float bodyIntensity = (moonOwns ? moonCurrentIntensity : sunCurrentIntensity) * handover;
+                bool bodyActive = (moonOwns ? moonActive : sunActive) && bodyIntensity > 0.0005f;
 
-                    if (manageShadows)
-                    {
-                        sunLight.shadows = sunActive ? celestialShadows : LightShadows.None;
-                    }
-                }
-                else
-                {
-                    // Night phase: seamlessly redirect unified light to track Moon
-                    sunLight.transform.forward = -moonDir;
-                    sunLight.intensity = moonCurrentIntensity;
-                    sunLight.color = evaluatedMoonColor;
-                    sunLight.enabled = moonActive;
+                sunLight.transform.forward = -bodyDir;
+                sunLight.intensity = bodyIntensity;
+                sunLight.color = bodyColor;
+                sunLight.enabled = bodyActive;
 
-                    if (manageShadows)
-                    {
-                        sunLight.shadows = moonActive ? celestialShadows : LightShadows.None;
-                    }
+                if (manageShadows)
+                {
+                    sunLight.shadows = bodyActive ? celestialShadows : LightShadows.None;
                 }
 
                 if (RenderSettings.sun != sunLight)

@@ -32,6 +32,9 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("月球本体与反射月光的着色基调。")]
         public ColorParameter moonColor = new ColorParameter(new Color(0.92f, 0.95f, 1.0f, 1.0f), false, false, true);
 
+        [Tooltip("月亮升出或落入地平线时的渐显过渡宽度（月亮自身仰角的度数）。0 为硬边，值越大出现得越柔。")]
+        public ClampedFloatParameter riseFade = new ClampedFloatParameter(10.0f, 0.0f, 45.0f);
+
         [Header("月相系统 (Lunar Phase)")]
         [Tooltip("月相计算模式：Automatic(根据太阳-月球天文夹角物理推算) 或 Manual(手动调节月相)。")]
         public MoonPhaseModeParameter phaseMode = new MoonPhaseModeParameter(MoonPhaseMode.Automatic);
@@ -57,6 +60,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             moonSize.overrideState = true;
             moonBrightness.overrideState = true;
             moonColor.overrideState = true;
+            riseFade.overrideState = true;
             phaseMode.overrideState = true;
             lunarPhase.overrideState = true;
             earthshine.overrideState = true;
@@ -72,6 +76,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 hash = hash * 31 + moonSize.value.GetHashCode();
                 hash = hash * 31 + moonBrightness.value.GetHashCode();
                 hash = hash * 31 + moonColor.value.GetHashCode();
+                hash = hash * 31 + riseFade.value.GetHashCode();
                 hash = hash * 31 + ((int)phaseMode.value).GetHashCode();
                 hash = hash * 31 + lunarPhase.value.GetHashCode();
                 hash = hash * 31 + earthshine.value.GetHashCode();

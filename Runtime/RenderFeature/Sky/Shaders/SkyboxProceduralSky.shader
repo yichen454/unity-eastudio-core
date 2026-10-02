@@ -30,6 +30,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
         [HideInInspector] _MoonParams ("Moon Parameters (Size, Brightness, Earthshine, Halo)", Vector) = (0.06, 1.2, 0.04, 0.5)
         [HideInInspector] _MoonColor ("Moon Color", Color) = (0.92, 0.95, 1.0, 1)
         [HideInInspector] _EnableMoon ("Enable Moon", Float) = 1.0
+        [HideInInspector] _MoonRiseFade ("Moon Rise Fade", Float) = 0.1736
 
         [HideInInspector] _SunDirection ("Sun Direction", Vector) = (0, 0.707, 0.707, 0)
         [HideInInspector] _SunColor ("Sun Color", Color) = (1, 1, 1, 1)
@@ -100,6 +101,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float4 _MoonParams;
                 float4 _MoonColor;
                 float _EnableMoon;
+                float _MoonRiseFade;
             CBUFFER_END
 
             float4x4 _CelestialStarsMatrix;
@@ -420,14 +422,24 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 float moonMask = moonData.a;
 
                 // The moon rises and sets through the same atmosphere as the sun, so it carries the same spectral
-                // transmittance and the same horizon fade. Without them the moon pops to full brightness the moment
-                // its disc clears the skyline, while the sun gets a smooth (and reddened) rise and set.
+                // transmittance and the same horizon fade. Transmittance alone does not make it emerge, though: it
+                // only reddens and trims the disc, which still snapped into existence the frame its centre crossed
+                // the skyline.
                 float3 moonDir = _MoonDirection.xyz;
                 moonDir *= rsqrt(max(dot(moonDir, moonDir), 1e-6));
                 float3 moonTransmittance = GetAtmosphereTransmittance(
                     float3(moonDir.x, AdjustedLightY(moonDir), moonDir.z), thickness, haze, hbias, M_OZONE2 * ozone);
+                // `groundBlend` fades the moon by where the *viewer* looks, so it is 0 everywhere above the skyline
+                // and a disc one degree up still rendered at full strength. The rise band is therefore keyed to the
+                // moon's own elevation -- the same lifted elevation the transmittance above uses -- which is what
+                // turns the disc into a glow that resolves instead of a lamp switching on.
                 float moonHorizonFade = saturate(1.0 - groundBlend * 2.0);
-                moonFinal *= saturate(moonTransmittance) * moonHorizonFade;
+                float moonRiseFade = smoothstep(0.0, max(_MoonRiseFade, 1e-5), AdjustedLightY(moonDir));
+                // The mask replaces sky with moon, so it has to fade with the disc: a moon that is dimmed but still
+                // fully masked punches a hole in the sky where its disc is.
+                float moonFade = moonHorizonFade * moonRiseFade;
+                moonFinal *= saturate(moonTransmittance) * moonFade;
+                moonMask *= moonFade;
 
                 // --- Crisp Sun Shape & Tight Coronal Halo (Deep Space) ---
                 float sunAttenuation = CalcSunAttenuation(lightDir, o_rayDir, sunSize, convergence);

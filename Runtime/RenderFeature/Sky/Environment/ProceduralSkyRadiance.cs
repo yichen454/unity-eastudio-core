@@ -74,6 +74,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         public Color moonColor;
         /// <summary>Moon halo intensity (<c>_MoonParams.w</c>).</summary>
         public float moonHaloIntensity;
+        /// <summary>Sine of the moon's rise band width in degrees (<c>_MoonRiseFade</c>).</summary>
+        public float moonRiseFade;
 
         /// <summary>
         /// When a night HDRI cubemap is assigned the shader replaces the flat night colour with it. This mirror then
@@ -178,7 +180,10 @@ namespace EAStudio.Core.RenderFeature.Sky
                 Vector3 moonTransmittance = AtmosphereTransmittance(
                     new Vector3(moonDir.x, AdjustedLightY(moonDir), moonDir.z), thickness, haze, hbias, kOzoneMultiplier * ozone);
                 float moonHorizonFade = Mathf.Clamp01(1f - groundBlend * 2f);
-                scattering += Vector3.Scale(MoonHalo(rayDir, moonDir, moonColorLinear), Saturate(moonTransmittance) * moonHorizonFade);
+                // Mirrors the shader: the rise band is keyed to the moon's own elevation, because groundBlend only
+                // knows where the viewer looks and is 0 everywhere above the skyline.
+                float moonRise = SmoothStep(0f, Mathf.Max(moonRiseFade, 1e-5f), AdjustedLightY(moonDir));
+                scattering += Vector3.Scale(MoonHalo(rayDir, moonDir, moonColorLinear), Saturate(moonTransmittance) * (moonHorizonFade * moonRise));
             }
 
             scattering = Vector3.Lerp(scattering, groundBase, groundBlend);
@@ -314,6 +319,34 @@ namespace EAStudio.Core.RenderFeature.Sky
         public static float NightWeight(Vector3 lightDir)
         {
             return SmoothStep(0.04f, -0.20f, AdjustedLightY(lightDir));
+        }
+
+        /// <summary>
+        /// Chromatic transmittance the atmosphere applies to the sunlight along <paramref name="lightDir"/>,
+        /// evaluated on the light's own path instead of the view ray the dome folds into <c>lightColor</c>.
+        /// <para>
+        /// A cloud has no atmosphere below it: the sunlight that lights the deck has already crossed the whole
+        /// column, so it reddens and dies with the sun exactly as the dome's <c>lightColor</c> does. Anything
+        /// that treats the deck's light as colour-only keeps it at its daytime hue while the sky around it goes
+        /// dark, which is what makes a low sun's clouds read as a uniformly bright sheet instead of embers.
+        /// HDRP applies the same term to its 2D cloud layer (PhysicallyBasedSky's
+        /// <c>EvaluateSunColorAttenuation</c>); the density model here is the one this dome already uses.
+        /// </para>
+        /// </summary>
+        public static Vector3 SunTransmittance(Vector3 lightDir, float atmosphereThickness, float aerosolHaze, float ozoneAbsorption)
+        {
+            Vector3 dir = lightDir;
+            float lengthSq = dir.sqrMagnitude;
+            dir = lengthSq < 0.001f ? Vector3.up : dir * (1f / Mathf.Sqrt(lengthSq));
+
+            float hbias = HeightBias(dir);
+            Vector3 adjusted = new Vector3(dir.x, AdjustedLightY(dir), dir.z);
+            return AtmosphereTransmittance(
+                adjusted,
+                Mathf.Max(atmosphereThickness, 0f),
+                Mathf.Max(aerosolHaze, 0f),
+                hbias,
+                kOzoneMultiplier * Mathf.Max(ozoneAbsorption, 0f));
         }
 
         private static Vector3 NormalizeRay(Vector3 rayDir)

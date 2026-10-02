@@ -7,25 +7,83 @@ using UnityEngine.Rendering.Universal;
 namespace EAStudio.Core.RenderFeature.Sky
 {
     /// <summary>
-    /// Foundation RenderGraph pass for downscaled cloud generation.
-    /// Provides low-resolution off-screen RTHandle creation and global binding.
+    /// RenderGraph pass that generates the downscaled, equirectangular-projected 2D cloud layer.
+    /// Owns the generator material, pushes the volume parameter set each frame, and
+    /// publishes the resulting RGBA cloud texture as the global <c>_CloudTexture</c>.
     /// </summary>
     public class CloudRenderPass
     {
         private const string k_GeneratorShader = "Hidden/EAStudio/CloudGenerator";
+        private const string k_DefaultCloudMapPath = "EAStudio/Sky/DefaultCloudMap";
+
+        /// <summary>
+        /// Depth of the cloud shell. The layer is a spherical slab, not a card, and this is its radial
+        /// thickness; HDRP derives it the same way (<c>_HighestAltitude = _LowestAltitude + 800</c>). It is
+        /// what the shader intersects to get the per-ray chord, so changing it trades a thin deck for a deep
+        /// one the way HDRP's does. `thickness` (Density) is a separate control: it is the extinction at a
+        /// texel, not the geometry.
+        /// </summary>
+        private const float k_CloudDeckThicknessMeters = 800f;
+
+        /// <summary>
+        /// Distance corresponding to one full revolution of the cloud panorama. Wind drifts along the
+        /// panorama's wrapping longitude axis, so wrapping the scroll into one revolution is invisible.
+        /// Also pushed to the shader as <c>_CloudMapTileSize</c> so both sides use the same unit.
+        /// </summary>
+        private const float k_CloudMapTileSizeMeters = 60000f;
+
+        /// <summary>
+        /// Mean Earth radius, used only to place the deck's own horizon. A layer at <c>altitude</c> rides a
+        /// sphere of <c>R + altitude</c>, whose horizon dips by <c>acos(R / (R + altitude))</c> below the
+        /// observer's. That dip is what keeps the deck lit after local sunset.
+        /// </summary>
+        private const float k_PlanetRadiusMeters = 6371000f;
+
+        private static readonly int s_CloudTextureID = Shader.PropertyToID("_CloudTexture");
+
+        private static readonly int s_CloudMapID = Shader.PropertyToID("_CloudMap");
+        private static readonly int s_CameraInvProjectionID = Shader.PropertyToID("_CloudCameraInvProjection");
+        private static readonly int s_CameraToWorldID = Shader.PropertyToID("_CloudCameraToWorld");
+        private static readonly int s_SunDirectionID = Shader.PropertyToID("_SunDirection");
+        private static readonly int s_MoonDirectionID = Shader.PropertyToID("_MoonDirection");
+        private static readonly int s_SunColorID = Shader.PropertyToID("_CloudSunColor");
+        private static readonly int s_MoonColorID = Shader.PropertyToID("_CloudMoonColor");
+        private static readonly int s_TintID = Shader.PropertyToID("_CloudTint");
+        private static readonly int s_AmbientProbeDimmerID = Shader.PropertyToID("_CloudAmbientProbeDimmer");
+        private static readonly int s_AmbientColorID = Shader.PropertyToID("_CloudAmbientColor");
+        private static readonly int s_AltitudeID = Shader.PropertyToID("_CloudAltitude");
+        private static readonly int s_HorizonFadeID = Shader.PropertyToID("_CloudHorizonFade");
+        private static readonly int s_RotationID = Shader.PropertyToID("_CloudRotation");
+        private static readonly int s_ChannelWeightsID = Shader.PropertyToID("_CloudChannelWeights");
+        private static readonly int s_OpacityID = Shader.PropertyToID("_CloudOpacity");
+        private static readonly int s_ExposureID = Shader.PropertyToID("_CloudExposure");
+        private static readonly int s_WindOffsetID = Shader.PropertyToID("_CloudWindOffset");
+        private static readonly int s_RaymarchingID = Shader.PropertyToID("_CloudRaymarching");
+        private static readonly int s_RaymarchingStepsID = Shader.PropertyToID("_CloudRaymarchingSteps");
+        private static readonly int s_RaymarchingDensityID = Shader.PropertyToID("_CloudRaymarchingDensity");
+        private static readonly int s_MapTileSizeID = Shader.PropertyToID("_CloudMapTileSize");
+        private static readonly int s_UpperHemisphereOnlyID = Shader.PropertyToID("_CloudUpperHemisphereOnly");
+        private static readonly int s_SunHorizonCosID = Shader.PropertyToID("_CloudSunHorizonCos");
+        private static readonly int s_PlanetRadiusID = Shader.PropertyToID("_CloudPlanetRadius");
+        private static readonly int s_DeckThicknessID = Shader.PropertyToID("_CloudDeckThickness");
 
         private Shader m_GeneratorShader;
         private Material m_GeneratorMaterial;
+        private Shader m_GeneratorShaderOverride;
+        private Texture2D m_DefaultCloudMap;
+        private bool m_DefaultCloudMapSearched;
 
-        private int m_DownscaleFactor = 2;
-        private static readonly int s_CloudTextureID = Shader.PropertyToID("_CloudTexture");
-
+        private int m_Resolution = 512;
         private readonly LowResPass m_LowResPass;
         private RenderPassEvent m_RenderPassEvent = RenderPassEvent.BeforeRenderingSkybox;
 
+        private float m_WindOffsetMeters;
+        private float m_DeckYawRad;
+        private int m_LastWindFrame = -1;
+
         public LowResPass LowRes => m_LowResPass;
         public RenderPassEvent RenderPassEvent => m_RenderPassEvent;
-        public int DownscaleFactor => m_DownscaleFactor;
+        public int Resolution => m_Resolution;
 
         public void UpdateRenderPassEvent(RenderPassEvent renderPassEvent)
         {
@@ -33,8 +91,6 @@ namespace EAStudio.Core.RenderFeature.Sky
             if (m_LowResPass != null)
                 m_LowResPass.renderPassEvent = renderPassEvent;
         }
-
-        private Shader m_GeneratorShaderOverride;
 
         public CloudRenderPass(Shader generatorShader = null, RenderPassEvent renderPassEvent = RenderPassEvent.BeforeRenderingSkybox)
         {
@@ -73,12 +129,132 @@ namespace EAStudio.Core.RenderFeature.Sky
             return m_GeneratorMaterial != null;
         }
 
-        public void Setup(VisualEnvironment visualEnv, CloudLayer cloudLayer)
+        /// <summary>
+        /// Pushes the cloud layer volume state onto the generator material and advances the wind offset.
+        /// Called once per frame by <see cref="SkyRenderFeature"/> before the low-res pass is enqueued.
+        /// </summary>
+        public void Setup(VisualEnvironment visualEnv, CloudLayer cloudLayer, ProceduralSky proceduralSky = null)
         {
             if (!EnsureMaterial() || visualEnv == null || cloudLayer == null)
                 return;
 
-            m_DownscaleFactor = Mathf.Max(1, (int)cloudLayer.downscale.value);
+            m_Resolution = (int)cloudLayer.resolution.value;
+
+            Material mat = m_GeneratorMaterial;
+
+            Texture cloudMap = cloudLayer.cloudMap.value != null ? cloudLayer.cloudMap.value : EnsureDefaultCloudMap();
+            mat.SetTexture(s_CloudMapID, cloudMap != null ? cloudMap : Texture2D.whiteTexture);
+
+            TimeOfDay tod = TimeOfDay.Instance;
+            Vector3 sunDir = tod != null ? tod.CurrentSunDirection : Vector3.up;
+            Vector3 moonDir = tod != null ? tod.CurrentMoonDirection : Vector3.down;
+            Color sunColor = tod != null ? tod.CurrentSunRadiance : Color.white;
+            Color moonColor = tod != null ? tod.CurrentMoonRadiance : Color.black;
+
+            // The deck sits inside the atmosphere, so its light is sunlight that has already crossed the whole
+            // column. Tinting it with the dome's own transmittance is HDRP's `EvaluateSunColorAttenuation` on the
+            // 2D cloud layer, and it is where a low sun's clouds get their ember red: blue and green are
+            // extinguished before red long before the sun reaches the horizon. The same filter is applied to the
+            // fill the deck receives from below, because that light is the ground and the lower atmosphere lit by
+            // the very same beam. Either term left unfiltered keeps its midday colour while the sky goes dark,
+            // and once the sun is down the fill is all that is left -- a constant that paints every texel of the
+            // deck identically. Under an HDRI sky there is no atmosphere to evaluate, so the light passes through
+            // untouched, matching HDRP, which only attenuates under PhysicallyBasedSky.
+            Vector3 sunTransmittance = proceduralSky != null
+                ? ProceduralSkyRadiance.SunTransmittance(sunDir, proceduralSky.atmosphereThickness.value,
+                                                         proceduralSky.aerosolHaze.value, proceduralSky.ozoneAbsorption.value)
+                : Vector3.one;
+            sunColor = new Color(sunColor.r * sunTransmittance.x, sunColor.g * sunTransmittance.y,
+                                 sunColor.b * sunTransmittance.z, sunColor.a);
+
+            mat.SetVector(s_SunDirectionID, sunDir);
+            mat.SetVector(s_MoonDirectionID, moonDir);
+            mat.SetColor(s_SunColorID, sunColor);
+            mat.SetColor(s_MoonColorID, moonColor);
+
+            mat.SetColor(s_TintID, cloudLayer.tint.value);
+            mat.SetFloat(s_AltitudeID, cloudLayer.altitude.value);
+            // Fade is authored in degrees of elevation because that is what an artist can reason about against
+            // the skyline; the shader compares it against `rayDir.y`, i.e. sin(elevation), so the conversion
+            // happens here. The deck is culled entirely below the horizon, which is in the shader.
+            mat.SetFloat(s_HorizonFadeID, Mathf.Sin(Mathf.Clamp(cloudLayer.horizonFade.value, 0f, 90f) * Mathf.Deg2Rad));
+            m_DeckYawRad = cloudLayer.rotation.value * Mathf.Deg2Rad;
+            mat.SetFloat(s_RotationID, m_DeckYawRad);
+            mat.SetFloat(s_OpacityID, cloudLayer.opacity.value);
+            mat.SetFloat(s_ExposureID, Mathf.Pow(2f, cloudLayer.exposure.value));
+            mat.SetVector(s_ChannelWeightsID, new Vector4(
+                cloudLayer.opacityR.value,
+                cloudLayer.opacityG.value,
+                cloudLayer.opacityB.value,
+                cloudLayer.opacityA.value));
+            mat.SetFloat(s_RaymarchingID, cloudLayer.lighting.value ? 1f : 0f);
+            mat.SetFloat(s_RaymarchingStepsID, cloudLayer.steps.value);
+            mat.SetFloat(s_RaymarchingDensityID, cloudLayer.thickness.value);
+            mat.SetFloat(s_AmbientProbeDimmerID, cloudLayer.ambientProbeDimmer.value);
+            // HDRP samples the ambient probe straight down: a cloud base is lit by whatever is below it, not
+            // by the sky it is hiding. The probe here is the one ProceduralSkyController bakes each frame, so
+            // the cloud shadow side tracks the sky instead of sitting at a hardcoded grey.
+            Color ambientDown = EvaluateAmbientDown();
+            mat.SetColor(s_AmbientColorID, new Color(ambientDown.r * sunTransmittance.x, ambientDown.g * sunTransmittance.y,
+                                                     ambientDown.b * sunTransmittance.z, ambientDown.a));
+            mat.SetFloat(s_MapTileSizeID, k_CloudMapTileSizeMeters);
+            mat.SetFloat(s_UpperHemisphereOnlyID, cloudLayer.upperHemisphereOnly.value ? 1f : 0f);
+            // Cosine of the deck's horizon dip. Negative, because the deck can see slightly below the
+            // observer's horizon; at the default 2000 m altitude it is about -0.025, i.e. the sun keeps
+            // lighting the deck until it is 1.4 degrees below the skyline.
+            float deckRadius = k_PlanetRadiusMeters + Mathf.Max(0f, cloudLayer.altitude.value);
+            float radiusRatio = k_PlanetRadiusMeters / deckRadius;
+            mat.SetFloat(s_SunHorizonCosID, -Mathf.Sqrt(Mathf.Max(0f, 1f - radiusRatio * radiusRatio)));
+            // The shell the shader intersects: planet radius plus the radial depth above altitude.
+            mat.SetFloat(s_PlanetRadiusID, k_PlanetRadiusMeters);
+            mat.SetFloat(s_DeckThicknessID, k_CloudDeckThicknessMeters);
+            // Wind scroll: the panorama can only move along its wrapping longitude axis, so the world-space
+            // wind vector is projected onto that axis (the meridian that maps to u = 0.5). Only the tangential
+            // component is representable; a cross-wind has no way to move an equirectangular layer.
+            // Guard by frame so multi-camera setups advance the offset once per frame.
+            if (m_LastWindFrame != Time.frameCount)
+            {
+                m_LastWindFrame = Time.frameCount;
+                // Wind "None" holds the deck still; "Horizontal" (Procedural) scrolls it, the only mode the
+                // 2D layer supports.
+                if (cloudLayer.distortionMode.value == CloudDistortionMode.Procedural)
+                {
+                    float windAngle = cloudLayer.scrollOrientation.value * Mathf.Deg2Rad;
+                    Vector2 windDir = new Vector2(Mathf.Cos(windAngle), Mathf.Sin(windAngle));
+                    Vector2 longitudeAxis = new Vector2(Mathf.Sin(m_DeckYawRad), Mathf.Cos(m_DeckYawRad));
+                    float drift = Vector2.Dot(windDir, longitudeAxis) * cloudLayer.scrollSpeed.value;
+                    m_WindOffsetMeters += drift * Time.deltaTime;
+                }
+
+                // One revolution of the panorama covers k_CloudMapTileSizeMeters, so wrapping the scroll is
+                // invisible. Without it the offset grows without bound and float precision degrades.
+                m_WindOffsetMeters = Mathf.Repeat(m_WindOffsetMeters, k_CloudMapTileSizeMeters);
+            }
+
+            mat.SetVector(s_WindOffsetID, new Vector4(m_WindOffsetMeters, 0f, 0f, 0f));
+        }
+
+        // Reused so the per-frame ambient evaluation does not allocate.
+        private static readonly Vector3[] s_AmbientDownDirections = { Vector3.down };
+        private static readonly Color[] s_AmbientDownResults = new Color[1];
+
+        /// <summary>
+        /// Evaluates the baked sky ambient probe in the down direction, matching HDRP's cloud ambient term.
+        /// </summary>
+        private static Color EvaluateAmbientDown()
+        {
+            RenderSettings.ambientProbe.Evaluate(s_AmbientDownDirections, s_AmbientDownResults);
+            return s_AmbientDownResults[0];
+        }
+
+        private Texture2D EnsureDefaultCloudMap()
+        {
+            if (!m_DefaultCloudMapSearched)
+            {
+                m_DefaultCloudMapSearched = true;
+                m_DefaultCloudMap = Resources.Load<Texture2D>(k_DefaultCloudMapPath);
+            }
+            return m_DefaultCloudMap;
         }
 
         public class LowResPass : ScriptableRenderPass
@@ -106,10 +282,21 @@ namespace EAStudio.Core.RenderFeature.Sky
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
 
+                // World-space view rays: the generator reconstructs them from the low-res uv.
+                Camera camera = cameraData.camera;
+                if (camera != null)
+                {
+                    Material mat = m_Parent.m_GeneratorMaterial;
+                    mat.SetMatrix(s_CameraInvProjectionID, camera.projectionMatrix.inverse);
+                    mat.SetMatrix(s_CameraToWorldID, camera.cameraToWorldMatrix);
+                }
+
                 // Downscale resolution computation
-                int factor = m_Parent.m_DownscaleFactor;
-                desc.width = Mathf.Max(1, desc.width / factor);
-                desc.height = Mathf.Max(1, desc.height / factor);
+                int res = m_Parent.m_Resolution;
+                // Match fixed pixel budget while preserving camera aspect ratio
+                float aspect = (float)desc.width / Mathf.Max(1, desc.height);
+                desc.width = res;
+                desc.height = Mathf.Max(1, Mathf.RoundToInt(res / aspect));
                 desc.depthBufferBits = 0;
                 desc.msaaSamples = 1;
 
@@ -119,7 +306,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                     depthBufferBits = 0,
                     msaaSamples = MSAASamples.None,
                     filterMode = FilterMode.Bilinear,
-                    wrapMode = TextureWrapMode.Clamp,
+                    wrapMode = TextureWrapMode.Mirror,
                     name = "_CloudTexture"
                 };
 

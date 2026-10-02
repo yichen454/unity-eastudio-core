@@ -79,7 +79,10 @@ namespace EAStudio.Core.RenderFeature.Sky
             ProceduralSky proceduralSky = null;
             MoonSettings moonSettings = stack.GetComponent<MoonSettings>();
             CloudLayer cloudLayer = (visualEnv.cloudType.value == CloudType.CloudLayer) ? stack.GetComponent<CloudLayer>() : null;
-            bool hasActiveClouds = cloudLayer != null && cloudLayer.enableClouds.value;
+            // HDRP derives cloud activation from VisualEnvironment.CloudType alone: the profile's own
+            // ALL/NONE and active toggles are what let an artist disable the deck, so there is no second
+            // per-component switch to keep in sync.
+            bool hasActiveClouds = cloudLayer != null;
 
             EnsureShaders();
             SkyEnvironmentSync.SetShaderOverrides(m_Shaders?.hdriSkyShader, m_Shaders?.proceduralSkyShader);
@@ -112,7 +115,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             {
                 if (hasActiveClouds)
                 {
-                    m_CloudRenderPass.Setup(visualEnv, cloudLayer);
+                    m_CloudRenderPass.Setup(visualEnv, cloudLayer, proceduralSky);
                     renderer.EnqueuePass(m_CloudRenderPass.LowRes);
                 }
                 else
