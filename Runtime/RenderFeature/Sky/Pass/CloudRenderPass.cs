@@ -289,8 +289,8 @@ namespace EAStudio.Core.RenderFeature.Sky
                 if (camera != null)
                 {
                     Material mat = m_Parent.m_GeneratorMaterial;
-                    mat.SetMatrix(s_CameraInvProjectionID, camera.projectionMatrix.inverse);
-                    mat.SetMatrix(s_CameraToWorldID, camera.cameraToWorldMatrix);
+                    mat.SetMatrix(s_CameraInvProjectionID, cameraData.GetProjectionMatrix().inverse);
+                    mat.SetMatrix(s_CameraToWorldID, cameraData.GetViewMatrix().inverse);
                 }
 
                 int divisor = m_Parent.m_Resolution;
