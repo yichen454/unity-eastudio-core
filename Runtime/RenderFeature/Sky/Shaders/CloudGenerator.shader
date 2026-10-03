@@ -29,7 +29,6 @@ Shader "Hidden/EAStudio/CloudGenerator"
             CBUFFER_START(UnityPerMaterial)
                 float4x4 _CloudCameraInvProjection[2];
                 float4x4 _CloudCameraToWorld[2];
-                float4 _CloudUVScaleBias;
                 float4 _SunDirection;
                 float4 _MoonDirection;
                 half4 _CloudSunColor;
@@ -240,8 +239,7 @@ Shader "Hidden/EAStudio/CloudGenerator"
             half4 Frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-                float2 rayUV = input.uv * _CloudUVScaleBias.xy + _CloudUVScaleBias.zw;
-                float2 ndc = rayUV * 2.0 - 1.0;
+                float2 ndc = input.uv * 2.0 - 1.0;
 
                 // Exact camera-relative world ray for this low-res texel. The composite skybox pass
                 // samples this texture with the matching screen uv, so the uv -> NDC mapping is shared.
