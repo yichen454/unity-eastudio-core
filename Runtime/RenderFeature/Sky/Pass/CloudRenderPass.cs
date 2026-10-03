@@ -42,8 +42,6 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_CloudTextureID = Shader.PropertyToID("_CloudTexture");
 
         private static readonly int s_CloudMapID = Shader.PropertyToID("_CloudMap");
-        private static readonly int s_CameraInvProjectionID = Shader.PropertyToID("_CloudCameraInvProjection");
-        private static readonly int s_CameraToWorldID = Shader.PropertyToID("_CloudCameraToWorld");
         private static readonly int s_FlipYID = Shader.PropertyToID("_CloudFlipY");
         private static readonly int s_SunDirectionID = Shader.PropertyToID("_SunDirection");
         private static readonly int s_MoonDirectionID = Shader.PropertyToID("_MoonDirection");
@@ -283,15 +281,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
-
-                // World-space view rays: the generator reconstructs them from the low-res uv.
-                Camera camera = cameraData.camera;
-                if (camera != null)
-                {
-                    Material mat = m_Parent.m_GeneratorMaterial;
-                    mat.SetMatrix(s_CameraInvProjectionID, cameraData.GetProjectionMatrix().inverse);
-                    mat.SetMatrix(s_CameraToWorldID, cameraData.GetViewMatrix().inverse);
-                }
 
                 int divisor = m_Parent.m_Resolution;
                 if (divisor != 1 && divisor != 2 && divisor != 4 && divisor != 8)

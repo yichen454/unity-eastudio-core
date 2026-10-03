@@ -26,8 +26,6 @@ Shader "Hidden/EAStudio/CloudGenerator"
             SAMPLER(sampler_CloudMap);
 
             CBUFFER_START(UnityPerMaterial)
-                float4x4 _CloudCameraInvProjection;
-                float4x4 _CloudCameraToWorld;
                 float _CloudFlipY;
                 float4 _SunDirection;
                 float4 _MoonDirection;
@@ -236,12 +234,11 @@ Shader "Hidden/EAStudio/CloudGenerator"
             {
                 float2 rayUV = input.uv;
                 rayUV.y = lerp(rayUV.y, 1.0 - rayUV.y, _CloudFlipY);
-                float2 ndc = rayUV * 2.0 - 1.0;
 
                 // Exact camera-relative world ray for this low-res texel. The composite skybox pass
                 // samples this texture with the matching screen uv, so the uv -> NDC mapping is shared.
-                float4 viewPos = mul(_CloudCameraInvProjection, float4(ndc, -1.0, 1.0));
-                float3 rayDir = normalize(mul((float3x3)_CloudCameraToWorld, viewPos.xyz));
+                float4 viewPos = mul(UNITY_MATRIX_I_P, ComputeClipSpacePosition(rayUV, UNITY_NEAR_CLIP_VALUE));
+                float3 rayDir = normalize(mul((float3x3)UNITY_MATRIX_I_V, viewPos.xyz));
 
                 // --- Equirectangular projection ---
                 // The cloud pass renders in screen space and the cloud map is an equirectangular hemisphere,
