@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-10-03
+
+### Changed
+- Cloud resolution now uses Full, Half, Quarter, or Eighth camera-relative dimensions, with migration from legacy fixed-size settings.
+- Cloud ray reconstruction uses Unity's built-in inverse projection and view matrices instead of custom matrix uploads.
+- Cloud generation applies relative target UV-origin correction without declaring an unnecessary Backbuffer sampling dependency.
+- Keep cloud compositing inside the skybox with vertex-derived screen UV. Cloud-specific stereo drawing and texture-array adaptation were rolled back after single-eye rendering reports.
+
+### Validation
+- C# compilation passed. Final Vulkan shader behavior and XR rendering remain subject to device verification.
+
 ## [1.4.2] - 2026-10-03
 
 ### Added
