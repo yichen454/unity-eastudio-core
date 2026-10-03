@@ -29,7 +29,7 @@ Shader "Skybox/EAStudio/HDRISky"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
-            #pragma target 3.5
+            #pragma target 2.0
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -49,7 +49,7 @@ Shader "Skybox/EAStudio/HDRISky"
             SAMPLER(sampler_TexB);
             half4 _TexB_HDR;
 
-            TEXTURE2D_X(_CloudTexture);
+            TEXTURE2D(_CloudTexture);
             float _HasClouds;
 
             CBUFFER_START(UnityPerMaterial)
@@ -123,7 +123,7 @@ Shader "Skybox/EAStudio/HDRISky"
                 if (_HasClouds > 0.5)
                 {
                     float2 screenUV = input.cloudScreenPosition.xy / input.cloudScreenPosition.z;
-                    half4 cloud = SAMPLE_TEXTURE2D_X_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
+                    half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
                     col = col * (1.0 - cloud.a) + cloud.rgb;
                 }
 

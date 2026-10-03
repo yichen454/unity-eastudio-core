@@ -261,8 +261,6 @@ namespace EAStudio.Core.RenderFeature.Sky
         public class LowResPass : ScriptableRenderPass
         {
             private readonly CloudRenderPass m_Parent;
-            private readonly Matrix4x4[] m_InvProjections = new Matrix4x4[2];
-            private readonly Matrix4x4[] m_CameraToWorld = new Matrix4x4[2];
 
             public LowResPass(CloudRenderPass parent)
             {
@@ -275,7 +273,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 public Material material;
                 public TextureHandle cloudTexture;
                 public TextureHandle activeColorTexture;
-                public bool singlePassXR;
             }
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -292,19 +289,8 @@ namespace EAStudio.Core.RenderFeature.Sky
                 if (camera != null)
                 {
                     Material mat = m_Parent.m_GeneratorMaterial;
-                    int viewCount = 1;
-#if ENABLE_VR && ENABLE_XR_MODULE
-                    if (cameraData.xr.enabled && cameraData.xr.singlePassEnabled)
-                        viewCount = cameraData.xr.viewCount;
-#endif
-                    for (int view = 0; view < 2; view++)
-                    {
-                        int viewIndex = Mathf.Min(view, viewCount - 1);
-                        m_InvProjections[view] = cameraData.GetProjectionMatrix(viewIndex).inverse;
-                        m_CameraToWorld[view] = cameraData.GetViewMatrix(viewIndex).inverse;
-                    }
-                    mat.SetMatrixArray(s_CameraInvProjectionID, m_InvProjections);
-                    mat.SetMatrixArray(s_CameraToWorldID, m_CameraToWorld);
+                    mat.SetMatrix(s_CameraInvProjectionID, camera.projectionMatrix.inverse);
+                    mat.SetMatrix(s_CameraToWorldID, camera.cameraToWorldMatrix);
                 }
 
                 int divisor = m_Parent.m_Resolution;
@@ -318,8 +304,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 TextureDesc textureDesc = new TextureDesc(desc.width, desc.height)
                 {
                     colorFormat = GraphicsFormat.R8G8B8A8_SRGB,
-                    dimension = desc.dimension,
-                    slices = desc.volumeDepth,
                     depthBufferBits = 0,
                     msaaSamples = MSAASamples.None,
                     filterMode = FilterMode.Bilinear,
@@ -339,11 +323,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                     passData.material = m_Parent.m_GeneratorMaterial;
                     passData.cloudTexture = cloudTex;
                     passData.activeColorTexture = resourceData.activeColorTexture;
-#if ENABLE_VR && ENABLE_XR_MODULE
-                    passData.singlePassXR = cameraData.xr.enabled && cameraData.xr.singlePassEnabled;
-                    if (passData.singlePassXR)
-                        builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
-#endif
 
                     if (resourceData != null && resourceData.cameraDepthTexture.IsValid())
                     {
@@ -358,9 +337,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                     {
                         bool flipY = context.GetTextureUVOrigin(data.cloudTexture) != context.GetTextureUVOrigin(data.activeColorTexture);
                         data.material.SetFloat(s_FlipYID, flipY ? 1f : 0f);
-                        if (data.singlePassXR)
-                            context.cmd.SetSinglePassStereo(SystemInfo.supportsMultiview
-                                ? SinglePassStereoMode.Multiview : SinglePassStereoMode.Instancing);
                         context.cmd.DrawProcedural(Matrix4x4.identity, data.material, 0, MeshTopology.Triangles, 3, 1);
                     });
                 }
