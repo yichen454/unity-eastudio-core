@@ -1,0 +1,134 @@
+#pragma kernel ResetArguments
+#pragma kernel Generate
+#pragma target 4.5
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "GrassBladeData.hlsl"
+
+Texture2D<float4> _Heightmap;
+Texture2D<float4> _Alphamap;
+Texture2D<float4> _Holes;
+SamplerState sampler_linear_clamp;
+RWStructuredBuffer<GrassBladeData> _GrassBlades;
+RWStructuredBuffer<uint> _Arguments;
+float4 _TerrainPosition, _TerrainSize, _Grid, _CameraCenter;
+float4 _Distribution, _BladeShape, _Distance;
+float4 _FrustumPlanes[12];
+float _Expansion;
+int _LayerChannel, _CandidateCount, _CandidateTotal, _BladeOffset, _ChunkIndex;
+int _ChunkTotal, _IndexCount, _EyeCount, _Capacity;
+
+uint GrassHash(uint value)
+{
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    return value ^ (value >> 16);
+}
+
+float GrassRandom(uint seed) { return (GrassHash(seed) & 0x00ffffffu) / 16777216.0; }
+
+float Height(float2 uv)
+{
+    uint width, height;
+    _Heightmap.GetDimensions(width, height);
+    float2 texel = saturate(uv) * float2(width - 1, height - 1);
+    int2 p = int2(texel);
+    int2 next = min(p + 1, int2(width - 1, height - 1));
+    float2 f = frac(texel);
+    float a = UnpackHeightmap(_Heightmap.Load(int3(p, 0)));
+    float b = UnpackHeightmap(_Heightmap.Load(int3(next.x, p.y, 0)));
+    float c = UnpackHeightmap(_Heightmap.Load(int3(p.x, next.y, 0)));
+    float d = UnpackHeightmap(_Heightmap.Load(int3(next, 0)));
+    // Native terrain height textures encode the normalized height over half their value range.
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y) * _TerrainSize.y * 2.0;
+}
+
+bool Visible(float3 root)
+{
+    for (int eye = 0; eye < _EyeCount; ++eye)
+    {
+        bool inside = true;
+        for (int plane = 0; plane < 6; ++plane)
+        {
+            float4 p = _FrustumPlanes[eye * 6 + plane];
+            inside = inside && dot(p.xyz, root) + p.w >= -_Expansion;
+        }
+        if (inside) return true;
+    }
+    return false;
+}
+
+[numthreads(64, 1, 1)]
+void ResetArguments(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_ChunkTotal) return;
+    uint offset = id.x * 5u;
+    _Arguments[offset] = (uint)_IndexCount;
+    _Arguments[offset + 1u] = 0;
+    _Arguments[offset + 2u] = 0;
+    _Arguments[offset + 3u] = 0;
+    _Arguments[offset + 4u] = 0;
+}
+
+[numthreads(64, 1, 1)]
+void Generate(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_CandidateCount) return;
+    uint columns = (uint)_Grid.z;
+    // A saturated chunk samples its whole area instead of spending its budget on an invisible row prefix.
+    uint candidate = _CandidateCount < _CandidateTotal
+        ? min((uint)(((float)id.x + 0.5) * ((float)_CandidateTotal / (float)_CandidateCount)), (uint)_CandidateTotal - 1u)
+        : id.x;
+    uint2 cell = uint2((uint)_Grid.x + candidate % columns, (uint)_Grid.y + candidate / columns);
+    uint seed = GrassHash(cell.x ^ GrassHash(cell.y) ^ asuint(_TerrainPosition.x) ^ GrassHash(asuint(_TerrainPosition.z)));
+    float2 jitter = float2(GrassRandom(seed + 17u), GrassRandom(seed + 31u));
+    float2 local = (float2(cell) + jitter) * _Grid.w;
+    if (any(local >= _TerrainSize.xz)) return;
+    float2 uv = local / _TerrainSize.xz;
+    float weight = _Alphamap.SampleLevel(sampler_linear_clamp, uv, 0)[_LayerChannel];
+    if (weight < _Distribution.y) return;
+    uint holeWidth, holeHeight;
+    _Holes.GetDimensions(holeWidth, holeHeight);
+    int2 holePixel = min(int2(uv * float2(holeWidth, holeHeight)), int2(holeWidth - 1, holeHeight - 1));
+    if (_Holes.Load(int3(holePixel, 0)).r < 0.5) return;
+
+    float3 root = float3(local.x, Height(uv), local.y) + _TerrainPosition.xyz;
+    float distance = length(root - _CameraCenter.xyz);
+    if (distance >= _Distribution.z || !Visible(root)) return;
+    float farFactor = saturate((distance - min(_Distribution.w, _Distribution.z * 0.95))
+        / max(_Distribution.z - min(_Distribution.w, _Distribution.z * 0.95), 0.01));
+    float densityFactor = lerp(1.0, _Distance.x, farFactor);
+    float survival = weight * densityFactor;
+    float rank = GrassRandom(seed + 47u);
+    // A stable random rank drives thinning; short blades soften threshold crossings.
+    float shrink = smoothstep(rank - 0.03, rank + 0.03, survival);
+    shrink *= saturate((_Distribution.z - distance) / max(_Distribution.z * 0.1, 0.1));
+    if (shrink <= 0.001) return;
+
+    uint heightWidth, heightHeight;
+    _Heightmap.GetDimensions(heightWidth, heightHeight);
+    float2 texel = 1.0 / float2(heightWidth - 1, heightHeight - 1);
+    float2 lo = max(uv - texel, 0.0);
+    float2 hi = min(uv + texel, 1.0);
+    float dx = (Height(float2(hi.x, uv.y)) - Height(float2(lo.x, uv.y))) / max((hi.x - lo.x) * _TerrainSize.x, 0.001);
+    float dz = (Height(float2(uv.x, hi.y)) - Height(float2(uv.x, lo.y))) / max((hi.y - lo.y) * _TerrainSize.z, 0.001);
+    float3 normal = normalize(float3(-dx, 1.0, -dz));
+    float random = GrassRandom(seed + 61u);
+    float angle = random * TWO_PI;
+    float2 facing = float2(cos(angle), sin(angle));
+    float2 toCamera = _CameraCenter.xz - root.xz;
+    toCamera = dot(toCamera, toCamera) > 0.0001 ? normalize(toCamera) : facing;
+    // Treat orientation as an axis to avoid a zero-length interpolation between opposite facings.
+    if (dot(facing, toCamera) < 0.0) toCamera = -toCamera;
+    facing = normalize(lerp(facing, toCamera, farFactor));
+    GrassBladeData blade;
+    blade.rootHeight = float4(root, _BladeShape.x * lerp(1.0 - _BladeShape.z, 1.0, GrassRandom(seed + 79u)) * shrink);
+    blade.normalWidth = float4(normal, _BladeShape.y * min(_Distance.y, rcp(max(densityFactor, 0.01))));
+    blade.facingRandom = float4(facing, random, farFactor);
+    uint slot;
+    InterlockedAdd(_Arguments[_ChunkIndex * 5 + 1], 1u, slot);
+    // Each dispatch has at most CandidateCount threads, with a disjoint pre-reserved output segment.
+    if (slot < (uint)_CandidateCount && (uint)_BladeOffset + slot < (uint)_Capacity)
+        _GrassBlades[(uint)_BladeOffset + slot] = blade;
+}

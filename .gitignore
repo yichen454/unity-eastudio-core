@@ -29,3 +29,7 @@ doc*
 AGENTS.md*
 MEMORY.md*
 CONTEXT.md*
+
+# Local verification tests
+/Tests/
+/Tests.meta
