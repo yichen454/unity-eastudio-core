@@ -275,6 +275,7 @@ namespace EAStudio.Core.RenderFeature.Sky
                 public Material material;
                 public TextureHandle cloudTexture;
                 public TextureHandle activeColorTexture;
+                public bool singlePassXR;
             }
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -338,6 +339,11 @@ namespace EAStudio.Core.RenderFeature.Sky
                     passData.material = m_Parent.m_GeneratorMaterial;
                     passData.cloudTexture = cloudTex;
                     passData.activeColorTexture = resourceData.activeColorTexture;
+#if ENABLE_VR && ENABLE_XR_MODULE
+                    passData.singlePassXR = cameraData.xr.enabled && cameraData.xr.singlePassEnabled;
+                    if (passData.singlePassXR)
+                        builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
+#endif
 
                     if (resourceData != null && resourceData.cameraDepthTexture.IsValid())
                     {
@@ -352,6 +358,9 @@ namespace EAStudio.Core.RenderFeature.Sky
                     {
                         bool flipY = context.GetTextureUVOrigin(data.cloudTexture) != context.GetTextureUVOrigin(data.activeColorTexture);
                         data.material.SetFloat(s_FlipYID, flipY ? 1f : 0f);
+                        if (data.singlePassXR)
+                            context.cmd.SetSinglePassStereo(SystemInfo.supportsMultiview
+                                ? SinglePassStereoMode.Multiview : SinglePassStereoMode.Instancing);
                         context.cmd.DrawProcedural(Matrix4x4.identity, data.material, 0, MeshTopology.Triangles, 3, 1);
                     });
                 }
