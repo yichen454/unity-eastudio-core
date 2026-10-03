@@ -275,7 +275,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                 public Material material;
                 public TextureHandle cloudTexture;
                 public TextureHandle activeColorTexture;
-                public MaterialPropertyBlock properties;
             }
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -339,7 +338,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                     passData.material = m_Parent.m_GeneratorMaterial;
                     passData.cloudTexture = cloudTex;
                     passData.activeColorTexture = resourceData.activeColorTexture;
-                    passData.properties = new MaterialPropertyBlock();
                     builder.UseTexture(passData.activeColorTexture, AccessFlags.Read);
 
                     if (resourceData != null && resourceData.cameraDepthTexture.IsValid())
@@ -354,8 +352,8 @@ namespace EAStudio.Core.RenderFeature.Sky
                     builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
                     {
                         bool flipY = context.GetTextureUVOrigin(data.cloudTexture) != context.GetTextureUVOrigin(data.activeColorTexture);
-                        data.properties.SetFloat(s_FlipYID, flipY ? 1f : 0f);
-                        context.cmd.DrawProcedural(Matrix4x4.identity, data.material, 0, MeshTopology.Triangles, 3, 1, data.properties);
+                        data.material.SetFloat(s_FlipYID, flipY ? 1f : 0f);
+                        context.cmd.DrawProcedural(Matrix4x4.identity, data.material, 0, MeshTopology.Triangles, 3, 1);
                     });
                 }
             }
