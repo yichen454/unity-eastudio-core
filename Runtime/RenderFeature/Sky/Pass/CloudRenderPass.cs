@@ -44,7 +44,6 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_CloudMapID = Shader.PropertyToID("_CloudMap");
         private static readonly int s_CameraInvProjectionID = Shader.PropertyToID("_CloudCameraInvProjection");
         private static readonly int s_CameraToWorldID = Shader.PropertyToID("_CloudCameraToWorld");
-        private static readonly int s_WorldToClipID = Shader.PropertyToID("_CloudWorldToClip");
         private static readonly int s_SunDirectionID = Shader.PropertyToID("_SunDirection");
         private static readonly int s_MoonDirectionID = Shader.PropertyToID("_MoonDirection");
         private static readonly int s_SunColorID = Shader.PropertyToID("_CloudSunColor");
@@ -263,7 +262,6 @@ namespace EAStudio.Core.RenderFeature.Sky
             private readonly CloudRenderPass m_Parent;
             private readonly Matrix4x4[] m_InvProjections = new Matrix4x4[2];
             private readonly Matrix4x4[] m_CameraToWorld = new Matrix4x4[2];
-            private readonly Matrix4x4[] m_WorldToClip = new Matrix4x4[2];
 
             public LowResPass(CloudRenderPass parent)
             {
@@ -301,12 +299,9 @@ namespace EAStudio.Core.RenderFeature.Sky
                         int viewIndex = Mathf.Min(view, viewCount - 1);
                         m_InvProjections[view] = cameraData.GetProjectionMatrix(viewIndex).inverse;
                         m_CameraToWorld[view] = cameraData.GetViewMatrix(viewIndex).inverse;
-                        m_WorldToClip[view] = cameraData.GetProjectionMatrix(viewIndex) * cameraData.GetViewMatrix(viewIndex);
                     }
                     mat.SetMatrixArray(s_CameraInvProjectionID, m_InvProjections);
                     mat.SetMatrixArray(s_CameraToWorldID, m_CameraToWorld);
-                    if (RenderSettings.skybox != null)
-                        RenderSettings.skybox.SetMatrixArray(s_WorldToClipID, m_WorldToClip);
                 }
 
                 int divisor = m_Parent.m_Resolution;

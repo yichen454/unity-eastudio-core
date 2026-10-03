@@ -75,7 +75,6 @@ Shader "Skybox/EAStudio/ProceduralSky"
             SAMPLER(sampler_MoonTexture);
 
             CBUFFER_START(UnityPerMaterial)
-                float4x4 _CloudWorldToClip[2];
                 float _Exposure;
                 float _SunSize;
                 float _SunConvergence;
@@ -118,6 +117,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
             {
                 float4 positionCS : SV_POSITION;
                 float3 texcoord : TEXCOORD0;
+                float3 cloudScreenPosition : TEXCOORD1;
                 UNITY_VERTEX_OUTPUT_STEREO
             };
 
@@ -128,6 +128,11 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                float2 cloudScreenXY = output.positionCS.xy;
+#if UNITY_UV_STARTS_AT_TOP
+                cloudScreenXY.y = -cloudScreenXY.y;
+#endif
+                output.cloudScreenPosition = float3(cloudScreenXY * 0.5 + output.positionCS.w * 0.5, output.positionCS.w);
                 output.texcoord = input.positionOS.xyz;
                 return output;
             }
@@ -451,12 +456,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 // --- Tropospheric Cloud Deck Occlusion & Celestial Extinction ---
                 if (_HasClouds > 0.5)
                 {
-                    uint cloudEyeIndex = 0;
-#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
-                    cloudEyeIndex = unity_StereoEyeIndex;
-#endif
-                    float4 cloudClip = mul(_CloudWorldToClip[cloudEyeIndex], float4(input.texcoord, 0.0));
-                    float2 screenUV = cloudClip.xy / cloudClip.w * 0.5 + 0.5;
+                    float2 screenUV = input.cloudScreenPosition.xy / input.cloudScreenPosition.z;
                     half4 cloud = SAMPLE_TEXTURE2D_X_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
                     // 1. Celestial beam extinction:
