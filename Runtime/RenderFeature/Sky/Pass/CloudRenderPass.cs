@@ -44,6 +44,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private static readonly int s_CloudMapID = Shader.PropertyToID("_CloudMap");
         private static readonly int s_CameraInvProjectionID = Shader.PropertyToID("_CloudCameraInvProjection");
         private static readonly int s_CameraToWorldID = Shader.PropertyToID("_CloudCameraToWorld");
+        private static readonly int s_WorldToClipID = Shader.PropertyToID("_CloudWorldToClip");
         private static readonly int s_SunDirectionID = Shader.PropertyToID("_SunDirection");
         private static readonly int s_MoonDirectionID = Shader.PropertyToID("_MoonDirection");
         private static readonly int s_SunColorID = Shader.PropertyToID("_CloudSunColor");
@@ -73,7 +74,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         private Texture2D m_DefaultCloudMap;
         private bool m_DefaultCloudMapSearched;
 
-        private int m_Resolution = 512;
+        private int m_Resolution = 2;
         private readonly LowResPass m_LowResPass;
         private RenderPassEvent m_RenderPassEvent = RenderPassEvent.BeforeRenderingSkybox;
 
@@ -262,6 +263,7 @@ namespace EAStudio.Core.RenderFeature.Sky
             private readonly CloudRenderPass m_Parent;
             private readonly Matrix4x4[] m_InvProjections = new Matrix4x4[2];
             private readonly Matrix4x4[] m_CameraToWorld = new Matrix4x4[2];
+            private readonly Matrix4x4[] m_WorldToClip = new Matrix4x4[2];
 
             public LowResPass(CloudRenderPass parent)
             {
@@ -299,17 +301,19 @@ namespace EAStudio.Core.RenderFeature.Sky
                         int viewIndex = Mathf.Min(view, viewCount - 1);
                         m_InvProjections[view] = cameraData.GetProjectionMatrix(viewIndex).inverse;
                         m_CameraToWorld[view] = cameraData.GetViewMatrix(viewIndex).inverse;
+                        m_WorldToClip[view] = cameraData.GetProjectionMatrix(viewIndex) * cameraData.GetViewMatrix(viewIndex);
                     }
                     mat.SetMatrixArray(s_CameraInvProjectionID, m_InvProjections);
                     mat.SetMatrixArray(s_CameraToWorldID, m_CameraToWorld);
+                    if (RenderSettings.skybox != null)
+                        RenderSettings.skybox.SetMatrixArray(s_WorldToClipID, m_WorldToClip);
                 }
 
-                // Downscale resolution computation
-                int res = m_Parent.m_Resolution;
-                // Match fixed pixel budget while preserving camera aspect ratio
-                float aspect = (float)desc.width / Mathf.Max(1, desc.height);
-                desc.width = res;
-                desc.height = Mathf.Max(1, Mathf.RoundToInt(res / aspect));
+                int divisor = m_Parent.m_Resolution;
+                if (divisor != 1 && divisor != 2 && divisor != 4 && divisor != 8)
+                    divisor = 2;
+                desc.width = Mathf.Max(1, (desc.width + divisor - 1) / divisor);
+                desc.height = Mathf.Max(1, (desc.height + divisor - 1) / divisor);
                 desc.depthBufferBits = 0;
                 desc.msaaSamples = 1;
 

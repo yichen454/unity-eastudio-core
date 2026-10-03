@@ -6,22 +6,18 @@ using UnityEngine.Scripting.APIUpdating;
 namespace EAStudio.Core.RenderFeature.Sky
 {
     /// <summary>
-    /// Resolution of the baked cloud texture.
+    /// Resolution divisor relative to the camera target.
     /// </summary>
     public enum CloudResolution
     {
-        /// <summary>Size 256</summary>
-        CloudResolution256 = 256,
-        /// <summary>Size 512</summary>
-        CloudResolution512 = 512,
-        /// <summary>Size 1024</summary>
-        CloudResolution1024 = 1024,
-        /// <summary>Size 2048</summary>
-        CloudResolution2048 = 2048,
-        /// <summary>Size 4096</summary>
-        CloudResolution4096 = 4096,
-        /// <summary>Size 8192</summary>
-        CloudResolution8192 = 8192,
+        [InspectorName("Full Resolution")]
+        Full = 1,
+        [InspectorName("Half Resolution")]
+        Half = 2,
+        [InspectorName("Quarter Resolution")]
+        Quarter = 4,
+        [InspectorName("Eighth Resolution")]
+        Eighth = 8,
     }
 
     /// <summary>
@@ -62,8 +58,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         [Tooltip("Check this box if the cloud layer covers only the upper part of the sky.")]
         public BoolParameter upperHemisphereOnly = new BoolParameter(true);
 
-        [Tooltip("Specifies the resolution of the texture used to represent the clouds.")]
-        public EnumParameter<CloudResolution> resolution = new EnumParameter<CloudResolution>(CloudResolution.CloudResolution1024);
+        [Tooltip("Cloud texture resolution relative to each camera target dimension.")]
+        public EnumParameter<CloudResolution> resolution = new EnumParameter<CloudResolution>(CloudResolution.Half);
 
         [Header("Layer A")]
         [Tooltip("Specify the texture used to render the clouds (in LatLong layout).")]
@@ -123,6 +119,28 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         [Tooltip("Controls the influence of the ambient probe on the cloud layer volume. A lower value will suppress the ambient light and produce darker clouds overall.")]
         [Indent(1)] public ClampedFloatParameter ambientProbeDimmer = new ClampedFloatParameter(1.0f, 0.0f, 1.0f);
+
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            switch ((int)resolution.value)
+            {
+                case 256:
+                    resolution.value = CloudResolution.Eighth;
+                    break;
+                case 512:
+                    resolution.value = CloudResolution.Quarter;
+                    break;
+                case 1024:
+                    resolution.value = CloudResolution.Half;
+                    break;
+                case 2048:
+                case 4096:
+                case 8192:
+                    resolution.value = CloudResolution.Full;
+                    break;
+            }
+        }
 
         public virtual int GetParameterHashCode()
         {

@@ -53,6 +53,7 @@ Shader "Skybox/EAStudio/HDRISky"
             float _HasClouds;
 
             CBUFFER_START(UnityPerMaterial)
+                float4x4 _CloudWorldToClip[2];
                 float4 _Tint;
                 float _Exposure;
                 float _Rotation;
@@ -116,7 +117,12 @@ Shader "Skybox/EAStudio/HDRISky"
                 // Tropospheric Cloud Deck Occlusion (Physical Pre-multiplied Alpha)
                 if (_HasClouds > 0.5)
                 {
-                    float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
+                    uint cloudEyeIndex = 0;
+#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+                    cloudEyeIndex = unity_StereoEyeIndex;
+#endif
+                    float4 cloudClip = mul(_CloudWorldToClip[cloudEyeIndex], float4(input.texcoord, 0.0));
+                    float2 screenUV = cloudClip.xy / cloudClip.w * 0.5 + 0.5;
                     half4 cloud = SAMPLE_TEXTURE2D_X_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
                     col = col * (1.0 - cloud.a) + cloud.rgb;
                 }
