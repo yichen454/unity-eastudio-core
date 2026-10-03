@@ -9,6 +9,14 @@ namespace EAStudio.Core.RenderFeature.Shadow
     /// Volume component that overrides directional light cascade shadows and distance settings based on Volume blending.
     /// All distance and split parameters are configured in meters for artist-friendly authoring.
     /// </summary>
+    public enum ShadowWorkingUnit { Metric, Percent }
+
+    [Serializable]
+    public class ShadowWorkingUnitParameter : VolumeParameter<ShadowWorkingUnit>
+    {
+        public ShadowWorkingUnitParameter(ShadowWorkingUnit value, bool overrideState = false) : base(value, overrideState) { }
+    }
+
     [Serializable, VolumeComponentMenu("EAStudio/Shadow Settings")]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
     public class ShadowSettings : VolumeComponent, IPostProcessComponent
@@ -18,6 +26,9 @@ namespace EAStudio.Core.RenderFeature.Shadow
         public MinFloatParameter shadowDistance = new MinFloatParameter(50f, 0f);
 
         [Header("级联设置 (Cascade Distances in Meters)")]
+        [Tooltip("Working Unit for cascade splits.")]
+        public ShadowWorkingUnitParameter workingUnit = new ShadowWorkingUnitParameter(ShadowWorkingUnit.Metric);
+
         [Tooltip("主光源级联阴影数量 (1、2、3 或 4)。")]
         public ClampedIntParameter cascadeCount = new ClampedIntParameter(4, 1, 4);
 
@@ -63,6 +74,7 @@ namespace EAStudio.Core.RenderFeature.Shadow
             unchecked
             {
                 int hash = 17;
+                hash = hash * 31 + (workingUnit != null ? workingUnit.value.GetHashCode() : 0);
                 hash = hash * 31 + (shadowDistance != null ? shadowDistance.value.GetHashCode() : 0);
                 hash = hash * 31 + (cascadeCount != null ? cascadeCount.value.GetHashCode() : 0);
                 hash = hash * 31 + (cascade2Distance != null ? cascade2Distance.value.GetHashCode() : 0);

@@ -16,7 +16,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         public MoonPhaseModeParameter(MoonPhaseMode value, bool overrideState = false) : base(value, overrideState) { }
     }
 
-    [Serializable, VolumeComponentMenu("Sky/Moon Settings")]
+    [Serializable, VolumeComponentMenu("EAStudio/Sky/Moon Settings")]
     public class MoonSettings : VolumeComponent
     {
         [Header("月球渲染 (Moon Rendering)")]

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-10-03
+
+### Added
+- HDRP-style shadow Volume inspector with Metric/Percent working units, individual split sliders, and a draggable colored cascade split bar.
+
+### Changed
+- Keep shadow distances serialized in meters and expose a single URP cascade border.
+- Group sky Volume components under `EAStudio/Sky` in the Add Override menu.
+
 ## [1.4.1] - 2026-10-02
 
 ### Changed

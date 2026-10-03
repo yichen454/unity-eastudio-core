@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace EAStudio.Core.RenderFeature.Sky
 {
-    [Serializable, VolumeComponentMenu("Sky/Procedural Sky")]
+    [Serializable, VolumeComponentMenu("EAStudio/Sky/Procedural Sky")]
     public class ProceduralSky : SkySettings
     {
         [Header("太阳与日冕 (Sun & Corona)")]

@@ -10,7 +10,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         public CubemapParameter(Cubemap value, bool overrideState = false) : base(value, overrideState) { }
     }
 
-    [Serializable, VolumeComponentMenu("Sky/HDRI Sky")]
+    [Serializable, VolumeComponentMenu("EAStudio/Sky/HDRI Sky")]
     public class HDRISky : SkySettings
     {
         [Tooltip("HDRI 立方体贴图 (Cubemap)。")]

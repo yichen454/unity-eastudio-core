@@ -43,7 +43,7 @@ namespace EAStudio.Core.RenderFeature.Sky
         public CloudTypeParameter(CloudType value, bool overrideState = false) : base(value, overrideState) { }
     }
 
-    [Serializable, VolumeComponentMenu("Sky/Visual Environment")]
+    [Serializable, VolumeComponentMenu("EAStudio/Sky/Visual Environment")]
     public class VisualEnvironment : VolumeComponent
     {
         [Tooltip("天空渲染类型：None(无)、HDRI(全景贴图)、Procedural(物理大气程序化天空)。")]

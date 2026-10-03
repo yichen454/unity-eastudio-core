@@ -52,7 +52,7 @@ namespace EAStudio.Core.RenderFeature.Sky
     /// the ground-projected Cloud Shadows group) are deliberately not declared rather than shipped as
     /// dead controls.
     /// </remarks>
-    [Serializable, VolumeComponentMenu("Sky/Cloud Layer")]
+    [Serializable, VolumeComponentMenu("EAStudio/Sky/Cloud Layer")]
     [MovedFrom(true, "EAStudio.Core.RenderFeature.Sky", "EAStudio.Core.Runtime", "CloudSettings")]
     public class CloudLayer : VolumeComponent
     {
