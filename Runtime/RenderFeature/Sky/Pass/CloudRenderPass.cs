@@ -338,7 +338,6 @@ namespace EAStudio.Core.RenderFeature.Sky
                     passData.material = m_Parent.m_GeneratorMaterial;
                     passData.cloudTexture = cloudTex;
                     passData.activeColorTexture = resourceData.activeColorTexture;
-                    builder.UseTexture(passData.activeColorTexture, AccessFlags.Read);
 
                     if (resourceData != null && resourceData.cameraDepthTexture.IsValid())
                     {
