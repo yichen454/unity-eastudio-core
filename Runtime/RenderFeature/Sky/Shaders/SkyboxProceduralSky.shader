@@ -56,7 +56,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
-            #pragma target 2.0
+            #pragma target 3.5
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -68,7 +68,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
             #define unity_ColorSpaceDouble half4(2.0, 2.0, 2.0, 2.0)
             #endif
 
-            TEXTURE2D(_CloudTexture);
+            TEXTURE2D_X(_CloudTexture);
             TEXTURECUBE(_NightSkyMap);
             SAMPLER(sampler_NightSkyMap);
             TEXTURE2D(_MoonTexture);
@@ -451,7 +451,7 @@ Shader "Skybox/EAStudio/ProceduralSky"
                 if (_HasClouds > 0.5)
                 {
                     float2 screenUV = input.positionCS.xy / _ScaledScreenParams.xy;
-                    half4 cloud = SAMPLE_TEXTURE2D_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
+                    half4 cloud = SAMPLE_TEXTURE2D_X_LOD(_CloudTexture, sampler_LinearClamp, screenUV, 0);
 
                     // 1. Celestial beam extinction:
                     // High dynamic range Sun (50-500+) burns through linear alpha unless strictly extinguished in dense cloud cores.

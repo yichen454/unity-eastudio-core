@@ -260,6 +260,8 @@ namespace EAStudio.Core.RenderFeature.Sky
         public class LowResPass : ScriptableRenderPass
         {
             private readonly CloudRenderPass m_Parent;
+            private readonly Matrix4x4[] m_InvProjections = new Matrix4x4[2];
+            private readonly Matrix4x4[] m_CameraToWorld = new Matrix4x4[2];
 
             public LowResPass(CloudRenderPass parent)
             {
@@ -287,8 +289,19 @@ namespace EAStudio.Core.RenderFeature.Sky
                 if (camera != null)
                 {
                     Material mat = m_Parent.m_GeneratorMaterial;
-                    mat.SetMatrix(s_CameraInvProjectionID, camera.projectionMatrix.inverse);
-                    mat.SetMatrix(s_CameraToWorldID, camera.cameraToWorldMatrix);
+                    int viewCount = 1;
+#if ENABLE_VR && ENABLE_XR_MODULE
+                    if (cameraData.xr.enabled && cameraData.xr.singlePassEnabled)
+                        viewCount = cameraData.xr.viewCount;
+#endif
+                    for (int view = 0; view < 2; view++)
+                    {
+                        int viewIndex = Mathf.Min(view, viewCount - 1);
+                        m_InvProjections[view] = cameraData.GetProjectionMatrix(viewIndex).inverse;
+                        m_CameraToWorld[view] = cameraData.GetViewMatrix(viewIndex).inverse;
+                    }
+                    mat.SetMatrixArray(s_CameraInvProjectionID, m_InvProjections);
+                    mat.SetMatrixArray(s_CameraToWorldID, m_CameraToWorld);
                 }
 
                 // Downscale resolution computation
@@ -303,6 +316,8 @@ namespace EAStudio.Core.RenderFeature.Sky
                 TextureDesc textureDesc = new TextureDesc(desc.width, desc.height)
                 {
                     colorFormat = GraphicsFormat.R8G8B8A8_SRGB,
+                    dimension = desc.dimension,
+                    slices = desc.volumeDepth,
                     depthBufferBits = 0,
                     msaaSamples = MSAASamples.None,
                     filterMode = FilterMode.Bilinear,

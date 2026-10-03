@@ -19,6 +19,7 @@ Shader "Hidden/EAStudio/CloudGenerator"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma target 3.5
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
@@ -26,8 +27,8 @@ Shader "Hidden/EAStudio/CloudGenerator"
             SAMPLER(sampler_CloudMap);
 
             CBUFFER_START(UnityPerMaterial)
-                float4x4 _CloudCameraInvProjection;
-                float4x4 _CloudCameraToWorld;
+                float4x4 _CloudCameraInvProjection[2];
+                float4x4 _CloudCameraToWorld[2];
                 float4 _SunDirection;
                 float4 _MoonDirection;
                 half4 _CloudSunColor;
@@ -76,17 +77,21 @@ Shader "Hidden/EAStudio/CloudGenerator"
             struct Attributes
             {
                 uint vertexID : SV_VertexID;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
+                UNITY_VERTEX_OUTPUT_STEREO
             };
 
             Varyings Vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
                 output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
                 output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
                 return output;
@@ -233,12 +238,17 @@ Shader "Hidden/EAStudio/CloudGenerator"
 
             half4 Frag(Varyings input) : SV_Target
             {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 float2 ndc = input.uv * 2.0 - 1.0;
 
                 // Exact camera-relative world ray for this low-res texel. The composite skybox pass
                 // samples this texture with the matching screen uv, so the uv -> NDC mapping is shared.
-                float4 viewPos = mul(_CloudCameraInvProjection, float4(ndc, -1.0, 1.0));
-                float3 rayDir = normalize(mul((float3x3)_CloudCameraToWorld, viewPos.xyz));
+                uint eyeIndex = 0;
+#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+                eyeIndex = unity_StereoEyeIndex;
+#endif
+                float4 viewPos = mul(_CloudCameraInvProjection[eyeIndex], float4(ndc, -1.0, 1.0));
+                float3 rayDir = normalize(mul((float3x3)_CloudCameraToWorld[eyeIndex], viewPos.xyz));
 
                 // --- Equirectangular projection ---
                 // The cloud pass renders in screen space and the cloud map is an equirectangular hemisphere,
