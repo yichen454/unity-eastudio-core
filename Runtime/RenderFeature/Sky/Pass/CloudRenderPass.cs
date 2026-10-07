@@ -74,7 +74,7 @@ namespace EAStudio.Core.RenderFeature.Sky
 
         private int m_Resolution = 2;
         private readonly LowResPass m_LowResPass;
-        private RenderPassEvent m_RenderPassEvent = RenderPassEvent.BeforeRenderingSkybox;
+        private RenderPassEvent m_RenderPassEvent = RenderPassEvent.BeforeRenderingOpaques;
 
         private float m_WindOffsetMeters;
         private float m_DeckYawRad;
@@ -324,8 +324,8 @@ namespace EAStudio.Core.RenderFeature.Sky
 
                     builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
                     {
-                        bool flipY = context.GetTextureUVOrigin(data.cloudTexture) != context.GetTextureUVOrigin(data.activeColorTexture);
-                        data.material.SetFloat(s_FlipYID, flipY ? 1f : 0f);
+                        // bool flipY = context.GetTextureUVOrigin(data.cloudTexture) != context.GetTextureUVOrigin(data.activeColorTexture);
+                        // data.material.SetFloat(s_FlipYID, flipY ? 1f : 0f);
                         context.cmd.DrawProcedural(Matrix4x4.identity, data.material, 0, MeshTopology.Triangles, 3, 1);
                     });
                 }
