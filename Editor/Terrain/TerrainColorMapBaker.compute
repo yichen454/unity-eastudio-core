@@ -1,0 +1,223 @@
+// Stock URP 17.3 TerrainLitPasses.hlsl base-color rules, evaluated on an endpoint grid.
+#pragma kernel BakeGroup
+#pragma kernel VerifyOutput
+#pragma kernel Snapshot
+#pragma kernel BakeDetailGroup
+#pragma kernel EncodeDetail
+#pragma target 5.0
+
+Texture2D<float4> _Control;
+Texture2D<float4> _Diffuse0, _Diffuse1, _Diffuse2, _Diffuse3;
+Texture2D<float4> _Mask0, _Mask1, _Mask2, _Mask3;
+Texture2D<float4> _Normal0, _Normal1, _Normal2, _Normal3;
+Texture2D<float4> _GeometryNormal;
+SamplerState sampler_Diffuse0;
+SamplerState sampler_Normal0;
+SamplerState sampler_Mask0;
+SamplerState sampler_LinearClamp;
+RWTexture2D<float4> _Result;
+float4 _ST[4], _DiffuseScale[4], _MaskScale[4], _MaskOffset[4];
+float4 _Smoothness;
+float4 _NormalScale;
+float4 _HasMask;
+int _Width, _Height, _ControlWidth, _ControlHeight, _LayerCount, _Group;
+int _HeightBlend;
+float _HeightTransition;
+
+[numthreads(8,8,1)]
+void BakeGroup(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Width || id.y >= (uint)_Height) return;
+    float2 uv = float2(id.xy) / float2(_Width-1, _Height-1);
+    float2 controlUV = (uv * float2(_ControlWidth-1, _ControlHeight-1) + .5) / float2(_ControlWidth, _ControlHeight);
+    float4 weights = _Control.SampleLevel(sampler_LinearClamp, controlUV, 0);
+    float2 p[4], dx[4], dy[4];
+    for(int i=0;i<4;i++)
+    {
+        p[i] = uv * _ST[i].xy + _ST[i].zw;
+        dx[i] = float2(_ST[i].x / (_Width-1), 0);
+        dy[i] = float2(0, _ST[i].y / (_Height-1));
+        if (_Group*4+i >= _LayerCount) weights[i] = 0;
+    }
+    float contribution = dot(weights, float4(1,1,1,1));
+    float4 colors[4];
+    colors[0] = _Diffuse0.SampleGrad(sampler_Diffuse0, p[0], dx[0], dy[0]);
+    colors[1] = _Diffuse1.SampleGrad(sampler_Diffuse0, p[1], dx[1], dy[1]);
+    colors[2] = _Diffuse2.SampleGrad(sampler_Diffuse0, p[2], dx[2], dy[2]);
+    colors[3] = _Diffuse3.SampleGrad(sampler_Diffuse0, p[3], dx[3], dy[3]);
+    if (_LayerCount <= 4)
+    {
+        if (_HeightBlend != 0)
+        {
+            float4 masks[4];
+            masks[0] = lerp(.5, _Mask0.SampleGrad(sampler_Mask0, p[0], dx[0], dy[0]), _HasMask.x);
+            masks[1] = lerp(.5, _Mask1.SampleGrad(sampler_Mask0, p[1], dx[1], dy[1]), _HasMask.y);
+            masks[2] = lerp(.5, _Mask2.SampleGrad(sampler_Mask0, p[2], dx[2], dy[2]), _HasMask.z);
+            masks[3] = lerp(.5, _Mask3.SampleGrad(sampler_Mask0, p[3], dx[3], dy[3]), _HasMask.w);
+            float4 heights;
+            for(int j=0;j<4;j++) heights[j] = (masks[j] * _MaskScale[j] + _MaskOffset[j]).b * weights[j];
+            float maximum = max(max(heights.x, heights.y), max(heights.z, heights.w));
+            float4 weighted = (max(0, heights + max(_HeightTransition, 1e-5) - maximum) + 1e-6) * weights;
+            weights = weighted / max(dot(weighted, float4(1,1,1,1)), 1e-6);
+        }
+        else
+        {
+            float4 alpha = float4(colors[0].a, colors[1].a, colors[2].a, colors[3].a);
+            float4 density = saturate((alpha - (1-weights)) * 20) + .001 * weights;
+            weights = lerp(density, weights, float4(_DiffuseScale[0].w, _DiffuseScale[1].w, _DiffuseScale[2].w, _DiffuseScale[3].w));
+        }
+    }
+    float weight = dot(weights, float4(1,1,1,1));
+    // The forward add pass discards groups at or below this contribution.
+    float3 color = 0;
+    float smoothness = 0;
+    if (_Group == 0 || weight > .005)
+    {
+        float4 normalized = weights / (weight + 6.103515625e-5); // URP HALF_MIN
+        for(int k=0;k<4;k++) color += colors[k].rgb * _DiffuseScale[k].rgb * normalized[k] * contribution;
+        float4 masks[4];
+        masks[0] = lerp(.5, _Mask0.SampleGrad(sampler_Mask0, p[0], dx[0], dy[0]), _HasMask.x);
+        masks[1] = lerp(.5, _Mask1.SampleGrad(sampler_Mask0, p[1], dx[1], dy[1]), _HasMask.y);
+        masks[2] = lerp(.5, _Mask2.SampleGrad(sampler_Mask0, p[2], dx[2], dy[2]), _HasMask.z);
+        masks[3] = lerp(.5, _Mask3.SampleGrad(sampler_Mask0, p[3], dx[3], dy[3]), _HasMask.w);
+        float4 layerSmoothness;
+        for(int j=0;j<4;j++)
+        {
+            float maskSmoothness = (masks[j] * _MaskScale[j] + _MaskOffset[j]).a;
+            layerSmoothness[j] = lerp(colors[j].a * _Smoothness[j], maskSmoothness, _HasMask[j]);
+        }
+        smoothness = dot(normalized, layerSmoothness) * contribution;
+    }
+    if (_Group > 0)
+    {
+        float4 previous = _Result[id.xy];
+        color += previous.rgb;
+        smoothness += previous.a;
+    }
+    _Result[id.xy] = float4(color, saturate(smoothness));
+}
+
+RWTexture2D<float4> _DetailAccum;
+RWTexture2D<float4> _DetailOutput;
+
+float3 DecodeTerrainNormal(float4 packed, float scale)
+{
+#if defined(UNITY_NO_DXT5nm)
+    float3 normal = packed.rgb * 2 - 1;
+    normal.xy *= scale;
+#else
+    #if !defined(UNITY_ASTC_NORMALMAP_ENCODING)
+        packed.a *= packed.r;
+    #endif
+    float3 normal;
+    normal.xy = packed.ag * 2 - 1;
+    normal.z = max(1e-16, sqrt(1 - saturate(dot(normal.xy,normal.xy))));
+    normal.xy *= scale;
+#endif
+    return normal;
+}
+
+[numthreads(8,8,1)]
+void BakeDetailGroup(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Width || id.y >= (uint)_Height) return;
+    float2 uv = float2(id.xy) / float2(_Width-1, _Height-1);
+    float2 controlUV = (uv * float2(_ControlWidth-1, _ControlHeight-1) + .5) / float2(_ControlWidth, _ControlHeight);
+    float4 weights = _Control.SampleLevel(sampler_LinearClamp, controlUV, 0);
+    float2 p[4], dx[4], dy[4];
+    for (int i=0;i<4;i++)
+    {
+        p[i] = uv * _ST[i].xy + _ST[i].zw;
+        dx[i] = float2(_ST[i].x / (_Width-1), 0);
+        dy[i] = float2(0, _ST[i].y / (_Height-1));
+        if (_Group*4+i >= _LayerCount) weights[i] = 0;
+    }
+    float contribution = dot(weights, 1.0);
+    float4 masks[4];
+    masks[0] = lerp(.5, _Mask0.SampleGrad(sampler_Mask0, p[0], dx[0], dy[0]), _HasMask.x);
+    masks[1] = lerp(.5, _Mask1.SampleGrad(sampler_Mask0, p[1], dx[1], dy[1]), _HasMask.y);
+    masks[2] = lerp(.5, _Mask2.SampleGrad(sampler_Mask0, p[2], dx[2], dy[2]), _HasMask.z);
+    masks[3] = lerp(.5, _Mask3.SampleGrad(sampler_Mask0, p[3], dx[3], dy[3]), _HasMask.w);
+    float4 diffuseAlpha = float4(
+        _Diffuse0.SampleGrad(sampler_Diffuse0,p[0],dx[0],dy[0]).a,
+        _Diffuse1.SampleGrad(sampler_Diffuse0,p[1],dx[1],dy[1]).a,
+        _Diffuse2.SampleGrad(sampler_Diffuse0,p[2],dx[2],dy[2]).a,
+        _Diffuse3.SampleGrad(sampler_Diffuse0,p[3],dx[3],dy[3]).a);
+    if (_LayerCount <= 4)
+    {
+        if (_HeightBlend != 0)
+        {
+            float4 heights;
+            for (int i=0;i<4;i++) heights[i] = (masks[i] * _MaskScale[i] + _MaskOffset[i]).b * weights[i];
+            float maximum = max(max(heights.x,heights.y),max(heights.z,heights.w));
+            float4 weighted = (max(0, heights + max(_HeightTransition,1e-5) - maximum) + 1e-6) * weights;
+            weights = weighted / max(dot(weighted,1.0),1e-6);
+        }
+        else
+        {
+            float4 density = saturate((diffuseAlpha - (1-weights))*20) + .001*weights;
+            weights = lerp(density,weights,float4(_DiffuseScale[0].w,_DiffuseScale[1].w,_DiffuseScale[2].w,_DiffuseScale[3].w));
+        }
+    }
+    float weight = dot(weights,1.0);
+    float4 result = 0;
+    if (_Group == 0 || weight > .005)
+    {
+        float4 normalized = weights / (weight + 6.103515625e-5);
+        float3 normals[4];
+        normals[0] = DecodeTerrainNormal(_Normal0.SampleGrad(sampler_Normal0,p[0],dx[0],dy[0]),_NormalScale.x);
+        normals[1] = DecodeTerrainNormal(_Normal1.SampleGrad(sampler_Normal0,p[1],dx[1],dy[1]),_NormalScale.y);
+        normals[2] = DecodeTerrainNormal(_Normal2.SampleGrad(sampler_Normal0,p[2],dx[2],dy[2]),_NormalScale.z);
+        normals[3] = DecodeTerrainNormal(_Normal3.SampleGrad(sampler_Normal0,p[3],dx[3],dy[3]),_NormalScale.w);
+        float3 normalTS = 0;
+        float ao = 0;
+        for (int i=0;i<4;i++)
+        {
+            normalTS += normalized[i] * normals[i];
+            float maskAO = (masks[i] * _MaskScale[i] + _MaskOffset[i]).g;
+            float defaultAO = _MaskScale[i].g + _MaskOffset[i].g;
+            ao += normalized[i] * lerp(defaultAO,maskAO,_HasMask[i]);
+        }
+        result = float4(normalize(normalTS + float3(0,0,1e-5)) * contribution, ao * contribution);
+    }
+    if (_Group > 0) result += _DetailAccum[id.xy];
+    _DetailAccum[id.xy] = result;
+}
+
+float2 OctEncode(float3 normalWS)
+{
+    normalWS /= abs(normalWS.x) + abs(normalWS.y) + abs(normalWS.z);
+    float2 encoded = normalWS.xy;
+    if (normalWS.z < 0) encoded = (1 - abs(encoded.yx)) * float2(encoded.x >= 0 ? 1 : -1, encoded.y >= 0 ? 1 : -1);
+    return encoded * .5 + .5;
+}
+
+[numthreads(8,8,1)]
+void EncodeDetail(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Width || id.y >= (uint)_Height) return;
+    float4 mixed = _DetailAccum[id.xy];
+    float3 geometry = normalize(_GeometryNormal.Load(int3(id.xy,0)).xyz);
+    float3 tangent = normalize(cross(float3(0,0,1),geometry));
+    float3 bitangent = cross(geometry,tangent);
+    float3 normalTS = normalize(mixed.xyz + float3(0,0,1e-5));
+    float3 normalWS = normalize(-tangent*normalTS.x + bitangent*normalTS.y + geometry*normalTS.z);
+    _DetailOutput[id.xy] = float4(OctEncode(normalWS),saturate(mixed.a),1);
+}
+
+Texture2D<float4> _Imported;
+[numthreads(3,3,1)]
+void VerifyOutput(uint3 id : SV_DispatchThreadID)
+{
+    int2 source = int2(id.xy) * int2(_Width-1, _Height-1) / 2;
+    _Result[id.xy] = _Imported.Load(int3(source,0));
+}
+
+Texture2D<float4> _Source;
+int _CopyWidth, _CopyHeight, _CopyMip;
+[numthreads(8,8,1)]
+void Snapshot(uint3 id : SV_DispatchThreadID)
+{
+    if(id.x >= (uint)_CopyWidth || id.y >= (uint)_CopyHeight) return;
+    _Result[id.xy] = _Source.Load(int3(id.xy,_CopyMip));
+}
