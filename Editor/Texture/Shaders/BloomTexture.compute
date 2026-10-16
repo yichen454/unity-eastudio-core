@@ -1,0 +1,103 @@
+#pragma kernel Snapshot
+#pragma kernel Extract
+#pragma kernel Blur
+#pragma kernel Compose
+
+Texture2D<float4> _Source;
+Texture2D<float4> _Input;
+Texture2D<float4> _Snapshot;
+RWTexture2D<float4> _Result;
+RWStructuredBuffer<uint> _Stats;
+int2 _Size;
+int2 _SourceSize;
+int2 _Direction;
+int _Padding;
+int _BoxRadius;
+int _HaloOnly;
+int _DecodeSourceSRGB;
+float _Threshold;
+float _Knee;
+float _Intensity;
+float3 _Tint;
+float _Exposure;
+
+float3 FromSRGB(float3 c)
+{
+    return float3(c.r <= 0.04045 ? c.r / 12.92 : pow((c.r + 0.055) / 1.055, 2.4),
+                  c.g <= 0.04045 ? c.g / 12.92 : pow((c.g + 0.055) / 1.055, 2.4),
+                  c.b <= 0.04045 ? c.b / 12.92 : pow((c.b + 0.055) / 1.055, 2.4));
+}
+
+[numthreads(8, 8, 1)]
+void Snapshot(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_SourceSize)) return;
+    uint width, height;
+    _Source.GetDimensions(width, height);
+    if (id.x == 0 && id.y == 0)
+    {
+        _Stats[2] = width;
+        _Stats[3] = height;
+    }
+    float4 c = _Source.Load(int3(id.xy, 0));
+    if (any(isnan(c)) || any(isinf(c)) || any(abs(c.rgb) > 65504)) InterlockedOr(_Stats[1], 1);
+    if (c.a < 1.0) InterlockedOr(_Stats[0], 1);
+    if (_DecodeSourceSRGB != 0) c.rgb = FromSRGB(max(c.rgb, 0));
+    _Result[id.xy] = float4(max(c.rgb, 0), saturate(c.a));
+}
+
+[numthreads(8, 8, 1)]
+void Extract(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    int2 p = (int2)id.xy - _Padding;
+    float3 seed = 0;
+    if (all(p >= 0) && all(p < _SourceSize))
+    {
+        float4 c = _Snapshot.Load(int3(p, 0));
+        float b = max(c.r, max(c.g, c.b));
+        float q = clamp(b - _Threshold + _Knee, 0, 2 * _Knee);
+        float soft = _Knee > 0 ? q * q / (4 * _Knee) : 0;
+        seed = c.rgb * c.a * saturate(max(b - _Threshold, soft) / max(b, 1e-8));
+    }
+    _Result[id.xy] = float4(seed, 0);
+}
+
+[numthreads(8, 8, 1)]
+void Blur(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    float3 sum = 0;
+    for (int i = -_BoxRadius; i <= _BoxRadius; i++)
+    {
+        int2 p = (int2)id.xy + _Direction * i;
+        if (all(p >= 0) && all(p < _Size)) sum += _Input.Load(int3(p, 0)).rgb;
+    }
+    _Result[id.xy] = float4(sum / (2 * _BoxRadius + 1), 0);
+}
+
+float3 ToSRGB(float3 c)
+{
+    return float3(c.r <= 0.0031308 ? 12.92 * c.r : 1.055 * pow(c.r, 1.0 / 2.4) - 0.055,
+                  c.g <= 0.0031308 ? 12.92 * c.g : 1.055 * pow(c.g, 1.0 / 2.4) - 0.055,
+                  c.b <= 0.0031308 ? 12.92 * c.b : 1.055 * pow(c.b, 1.0 / 2.4) - 0.055);
+}
+
+[numthreads(8, 8, 1)]
+void Compose(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= (uint2)_Size)) return;
+    int2 p = (int2)id.xy - _Padding;
+    float4 source = 0;
+    if (_HaloOnly == 0 && all(p >= 0) && all(p < _SourceSize))
+        source = _Snapshot.Load(int3(p, 0));
+    float3 halo = _Input.Load(int3(id.xy, 0)).rgb * _Tint * _Intensity * _Exposure;
+    float3 energy = source.rgb * source.a * _Exposure + halo;
+    if (any(energy > 1)) InterlockedAdd(_Stats[4], 1);
+    energy = saturate(energy);
+    float alpha = max(source.a, max(energy.r, max(energy.g, energy.b)));
+    if (id.x == 0 || id.y == 0 || id.x == _Size.x - 1 || id.y == _Size.y - 1)
+        if (max(halo.r, max(halo.g, halo.b)) > 1.0 / 255)
+            InterlockedOr(_Stats[5], 1);
+    _Result[id.xy] = float4(ToSRGB(alpha > 0 ? energy / alpha : 0), alpha);
+}
