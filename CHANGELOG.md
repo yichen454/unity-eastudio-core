@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-10-16
+
+### Added
+- Bloom Texture Generator under `Tools/EAStudio/贴图`, with Composite and Halo Only output, transparent PNG export, and automatic canvas expansion for transparent sources.
+- Debounced live preview with RGB/Alpha inspection, selectable backgrounds, and a bounded, adjustable preview area.
+- Default, Sprite, and GUI color texture input support, clipping and edge warnings, and staged PNG verification with rollback on export failure.
+
+### Validation
+- Live Unity compilation and actual GUI texture generation passed with no console errors. Eleven local behavior tests passed through direct in-Editor invocation; the MCP Test Runner retry failed to initialize.
+- Full-resolution generation and GPU readback remain synchronous; large textures or blur radii may pause the Editor. Cross-platform and Gamma/Linear project comparisons remain unverified.
+
 ## [1.4.3] - 2026-10-03
 
 ### Changed
