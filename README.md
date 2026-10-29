@@ -103,5 +103,10 @@ Packages/com.eastudio.core/
 
 ---
 
+## Camera Clip Settings Volume
+
+Add `EAStudio/Camera Clip Settings` to a Volume Profile and enable the near and/or far override. Game cameras use their URP Volume Layer Mask and Volume Trigger; local volumes, weights and priorities blend from the camera's original clip planes. Overrides are applied before culling and restored after rendering, without changing the camera's serialized settings. If the blended range is invalid (`near <= 0` or `far <= near`), neither plane is applied. Scene View, preview and reflection cameras are not affected. Custom camera projection matrices and XR projection behavior are not covered by this feature.
+
 ## 👤 作者
 - **yichen454** - [GitHub 主页](https://github.com/yichen454)
+
