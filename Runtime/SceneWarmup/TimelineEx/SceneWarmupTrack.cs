@@ -18,10 +18,10 @@ namespace EAStudio.Core.SceneWarmup
 #if UNITY_EDITOR
             var director = go.GetComponent<PlayableDirector>();
             if (director != null && director.GetGenericBinding(this) is SceneWarmup warmup
-                && warmup.scene != null && !string.IsNullOrEmpty(warmup.scene.SceneName))
+                && !string.IsNullOrEmpty(warmup.SceneName))
             {
                 foreach (var clip in GetClips())
-                    clip.displayName = warmup.scene.SceneName;
+                    clip.displayName = warmup.SceneName;
             }
 #endif
             return ScriptPlayable<SceneWarmupMixerBehaviour>.Create(graph, inputCount);

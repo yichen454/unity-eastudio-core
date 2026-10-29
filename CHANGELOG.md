@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.7] - 2026-10-29
+
+### Changed
+- SceneWarmup and SceneReference now store only scenePath without serializing a SceneAsset reference, preventing unintended cross-scene asset dependencies.
+- Added SceneWarmupEditor and SceneReferenceDrawer to support drag-and-drop or object-picker assignment of a SceneAsset to quickly fill scenePath in the Inspector.
+
 ## [1.4.6] - 2026-10-29
 
 ### Added

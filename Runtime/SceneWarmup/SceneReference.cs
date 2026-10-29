@@ -2,32 +2,29 @@ using System;
 using System.IO;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace EAStudio.Core.SceneWarmup
 {
     /// <summary>
-    /// Serializable scene reference that supports drag-and-drop assignment in the Inspector.
-    /// Stores a <see cref="SceneAsset"/> in the Editor and serializes the scene path for runtime.
+    /// Serializable scene path wrapper that stores only the scene path without holding a <c>SceneAsset</c> reference.
     /// </summary>
     [Serializable]
-    public class SceneReference : ISerializationCallbackReceiver
+    public class SceneReference
     {
-#if UNITY_EDITOR
-        [SerializeField] private SceneAsset sceneAsset;
-#endif
         [SerializeField] private string scenePath = string.Empty;
 
         /// <summary>Full asset path, e.g. "Assets/Scenes/MyScene.unity".</summary>
-        public string ScenePath => scenePath;
+        public string ScenePath
+        {
+            get => scenePath;
+            set => scenePath = value ?? string.Empty;
+        }
 
         /// <summary>Scene name without path or extension.</summary>
-        public string SceneName => Path.GetFileNameWithoutExtension(scenePath);
+        public string SceneName => string.IsNullOrEmpty(scenePath) ? string.Empty : Path.GetFileNameWithoutExtension(scenePath);
 
-        /// <summary>True when a valid scene has been assigned.</summary>
-        public bool IsValid => !string.IsNullOrEmpty(scenePath);
+        /// <summary>True when a valid scene path has been assigned.</summary>
+        public bool IsValid => !string.IsNullOrWhiteSpace(scenePath);
 
         /// <summary>Asynchronously loads the scene in the given mode.</summary>
         public AsyncOperation LoadAsync(LoadSceneMode mode = LoadSceneMode.Additive)
@@ -39,15 +36,5 @@ namespace EAStudio.Core.SceneWarmup
             }
             return SceneManager.LoadSceneAsync(scenePath, mode);
         }
-
-        // Keep scenePath in sync with the dragged SceneAsset.
-        public void OnBeforeSerialize()
-        {
-#if UNITY_EDITOR
-            scenePath = sceneAsset != null ? AssetDatabase.GetAssetPath(sceneAsset) : string.Empty;
-#endif
-        }
-
-        public void OnAfterDeserialize() { }
     }
 }
