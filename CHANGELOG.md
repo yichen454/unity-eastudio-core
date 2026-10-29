@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-10-29
+
+### Added
+- Camera Clip Settings Volume for blending near and far clipping planes per URP Game camera, with original values restored after rendering.
+
+### Validation
+- Unity compilation completed without console errors; a 50% Volume blend and camera-value restoration were verified in the Editor. XR and custom projection matrices remain unverified.
+
 ## [1.4.4] - 2026-10-16
 
 ### Added
