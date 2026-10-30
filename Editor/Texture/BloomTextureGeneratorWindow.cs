@@ -50,7 +50,7 @@ namespace EAStudio.Core.Editor
             Repaint();
         }
 
-        [MenuItem("Tools/EAStudio/贴图/Bloom Texture Generator")]
+        [MenuItem("Tools/EAStudio/贴图/辉光贴图生成")]
         public static void Open()
         {
             var window = GetWindow<BloomTextureGeneratorWindow>("Bloom Texture Generator");

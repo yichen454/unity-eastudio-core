@@ -24,7 +24,7 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
         private GUIStyle _selectedRowStyle;
         private GUIStyle _unselectedRowStyle;
 
-        [MenuItem("Tools/EAStudio/Shader/Scene Shader Analyzer", false, 100)]
+        [MenuItem("Tools/EAStudio/着色器/场景着色器分析", false, 100)]
         public static void Open()
         {
             var window = GetWindow<SceneShaderAnalyzerWindow>("Shader 分析器");

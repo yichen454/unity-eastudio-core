@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-10-31
+
+### Added
+- Hierarchy Lighting window with optional shadow, light probe, Contribute GI, Receive GI and lightmap scale overrides, grouped Undo and prefab instance override recording.
+- Standalone Lightmap Analyzer with scene/hierarchy scopes, baked-binding diagnostics, paginated filters, object navigation and atlas texture, memory and reference information.
+
+### Changed
+- Localize both lighting tools to Chinese and consolidate EAStudio tool menus into Chinese asset, lighting, texture, terrain and shader categories.
+- Distinguish lightmap reception configuration from valid baked atlas bindings; treat atlas index zero as valid.
+
+### Validation
+- Lighting sources compiled against Unity 6000.3.10f1 reference assemblies. Live Editor GUI, Undo, prefab overrides and scanning behavior remain unverified because Unity MCP tools were unavailable in the authoring session.
+
 ## [1.4.7] - 2026-10-29
 
 ### Changed

@@ -23,7 +23,7 @@ namespace EAStudio.Core.Editor
         double lastStatusRefresh;
         Vector2 scroll;
 
-        [MenuItem("Tools/EAStudio/Terrain/Surface Baker")]
+        [MenuItem("Tools/EAStudio/地形/地表贴图烘焙")]
         public static void Open() => GetWindow<TerrainColorMapBakerWindow>("Surface Baker");
         public static void Open(TerrainColorMapBakeAsset selected)
         {

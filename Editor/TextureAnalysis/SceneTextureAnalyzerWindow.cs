@@ -41,7 +41,7 @@ namespace EAStudio.Core.Editor.TextureAnalysis
         private GUIStyle _unselectedRowStyle;
         private GUIStyle _badgeStyle;
 
-        [MenuItem("Tools/EAStudio/Texture/Scene Texture Analyzer", false, 101)]
+        [MenuItem("Tools/EAStudio/贴图/场景贴图分析", false, 101)]
         public static void Open()
         {
             var window = GetWindow<SceneTextureAnalyzerWindow>("纹理分析器");
