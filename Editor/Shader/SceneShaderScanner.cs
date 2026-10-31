@@ -47,10 +47,6 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
                         if (rend == null)
                             continue;
 
-                        Material[] sharedMaterials = rend.sharedMaterials;
-                        if (sharedMaterials == null || sharedMaterials.Length == 0)
-                            continue;
-
                         var target = new SceneReferencingTarget(
                             rend,
                             rend.gameObject,
@@ -58,12 +54,58 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
                             SceneTargetType.Renderer
                         );
 
-                        foreach (var mat in sharedMaterials)
+                        Material[] sharedMaterials;
+                        try
                         {
+                            sharedMaterials = rend.sharedMaterials;
+                        }
+                        catch (Exception exception)
+                        {
+                            report.MaterialIssues.Add(new MaterialScanIssue
+                            {
+                                Target = target, MaterialSlot = -1,
+                                Message = $"无法读取材质列表，已跳过此渲染器：{exception.Message}"
+                            });
+                            continue;
+                        }
+                        if (sharedMaterials == null || sharedMaterials.Length == 0)
+                            continue;
+
+                        for (int slot = 0; slot < sharedMaterials.Length; slot++)
+                        {
+                            var mat = sharedMaterials[slot];
                             if (mat == null)
+                            {
+                                report.MissingMaterialSlots++;
+                                report.MaterialIssues.Add(new MaterialScanIssue
+                                {
+                                    Target = target, MaterialSlot = slot,
+                                    Message = "材质为空或引用已丢失，已跳过此槽位。"
+                                });
                                 continue;
+                            }
                             scannedMaterials.Add(mat);
-                            RegisterMaterial(shaderMap, mat, target);
+                            try
+                            {
+                                if (mat.shader == null)
+                                {
+                                    report.MaterialIssues.Add(new MaterialScanIssue
+                                    {
+                                        Target = target, MaterialSlot = slot,
+                                        Message = "材质缺少着色器，已跳过此槽位。"
+                                    });
+                                    continue;
+                                }
+                                RegisterMaterial(shaderMap, mat, target);
+                            }
+                            catch (Exception exception)
+                            {
+                                report.MaterialIssues.Add(new MaterialScanIssue
+                                {
+                                    Target = target, MaterialSlot = slot,
+                                    Message = $"材质解析失败，已跳过此槽位：{exception.Message}"
+                                });
+                            }
                         }
                     }
                 }
@@ -295,6 +337,10 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
             if (shader == null)
                 return;
 
+            // Read material data before mutating accumulators so failed reads leave no partial entry.
+            string[] keywords = GetSortedKeywords(mat);
+            string signature = keywords.Length > 0 ? string.Join(" ", keywords) : "[No Keywords / Default]";
+
             if (!shaderMap.TryGetValue(shader, out var acc))
             {
                 acc = new ShaderDataAccumulator();
@@ -303,9 +349,6 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
 
             acc.UniqueMaterials.Add(mat);
             acc.AllTargets.Add(target);
-
-            string[] keywords = GetSortedKeywords(mat);
-            string signature = keywords.Length > 0 ? string.Join(" ", keywords) : "[No Keywords / Default]";
 
             if (!acc.VariantMap.TryGetValue(signature, out var varAcc))
             {

@@ -18,6 +18,7 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
         private readonly Dictionary<string, bool> _targetFoldouts = new Dictionary<string, bool>();
         private bool _showKeywordsImpact = true;
         private bool _showVariantList = true;
+        private bool _showMaterialIssues;
 
         private GUIStyle _headerLabelStyle;
         private GUIStyle _cardBoxStyle;
@@ -76,6 +77,7 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
 
             DrawTopToolbar();
             DrawSummaryDashboard();
+            DrawMaterialIssues();
 
             EditorGUILayout.Space(2);
 
@@ -137,6 +139,30 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
                 DrawStatCard("场景预估 Pass 变体", _report.TotalEstimatedPassVariants.ToString());
             }
             EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawMaterialIssues()
+        {
+            if (_report == null || _report.MaterialIssues.Count == 0)
+                return;
+
+            EditorGUILayout.HelpBox($"扫描已完成。缺失材质槽位：{_report.MissingMaterialSlots}；材质诊断：{_report.MaterialIssues.Count} 条。异常项已跳过，其余材质继续分析。槽位索引从 0 开始。", MessageType.Warning);
+            _showMaterialIssues = EditorGUILayout.Foldout(_showMaterialIssues, "查看材质诊断（最多显示前 20 条）", true);
+            if (!_showMaterialIssues)
+                return;
+            foreach (var issue in _report.MaterialIssues.Take(20))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    string slot = issue.MaterialSlot >= 0 ? $"槽位 {issue.MaterialSlot}" : "材质列表";
+                    EditorGUILayout.LabelField(new GUIContent($"{issue.Target.HierarchyPath} | {slot} | {issue.Message}", issue.Message));
+                    if (GUILayout.Button("定位", GUILayout.Width(45)) && issue.Target.HostGameObject)
+                    {
+                        Selection.activeGameObject = issue.Target.HostGameObject;
+                        EditorGUIUtility.PingObject(issue.Target.HostGameObject);
+                    }
+                }
+            }
         }
 
         private void DrawStatCard(string title, string value)

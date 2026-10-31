@@ -67,6 +67,13 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
         public int ReferencerCount => AllReferencingTargets.Count;
     }
 
+    public class MaterialScanIssue
+    {
+        public SceneReferencingTarget Target;
+        public int MaterialSlot;
+        public string Message;
+    }
+
     public class SceneShaderReport
     {
         public DateTime ScanTime;
@@ -76,6 +83,8 @@ namespace EAStudio.Core.Editor.ShaderAnalysis
         public int TotalUniqueShaders;
         public int TotalSceneVariants;
         public int TotalEstimatedPassVariants;
+        public int MissingMaterialSlots;
+        public List<MaterialScanIssue> MaterialIssues = new List<MaterialScanIssue>();
         public List<ShaderUsageEntry> Entries = new List<ShaderUsageEntry>();
     }
 }
